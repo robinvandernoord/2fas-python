@@ -75,12 +75,12 @@ directory = "src"
 include = []
 exclude = []
 # 'all':
-stop-after-first-failure = false
+stop-after-first-failure = true
 # pytest:
 coverage = 100
 badge = true
 # --format json indent
-json-indent = 4
+json-indent = 2
 
 
 [tool.black]

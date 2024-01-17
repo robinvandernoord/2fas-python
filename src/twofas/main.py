@@ -1,19 +1,19 @@
 import sys
 
-from ._security import cleanup_keyring
+from ._security import keyring_manager
 from .core import load_services
 
 
-def _main(filename: str = '') -> None:
-    cleanup_keyring()
+def _main(filename: str = "") -> None:
+    keyring_manager.cleanup_keyring()
 
     if not filename:
-        print('todo: remember previous file(s)')
+        print("todo: remember previous file(s)")
         return
 
     decrypted = load_services(filename)
 
-    print([(_, _.generate()) for _ in decrypted])
+    print([(_, _.generate()) for _ in decrypted.all()])
 
 
 def main() -> None:
@@ -21,7 +21,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    # fixme: soft-code
-    # todo: store prefered 2fas file somewhere
-    # todo: deal with unencrypted ones
     main()

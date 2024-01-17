@@ -1,21 +1,22 @@
 import base64
+import getpass
 import hashlib
 import json
 import logging
-import sys
 import time
-from getpass import getpass
+import warnings
 from pathlib import Path
 from typing import Any, Optional
 
 import cryptography.exceptions
 import keyring
+import keyring.backends.SecretService
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 from keyring.backend import KeyringBackend
 
-from ._types import AnyDict, TwoFactorAuthDetails
+from ._types import AnyDict, TwoFactorAuthDetails, into_class
 
 # Suppress keyring warnings
 keyring_logger = logging.getLogger("keyring")
@@ -30,15 +31,20 @@ def _decrypt(encrypted: str, passphrase: str) -> list[AnyDict]:
     aesgcm = AESGCM(key)
     credentials_dec = aesgcm.decrypt(nonce, credentials_enc, None)
     dec = json.loads(credentials_dec)  # type: list[AnyDict]
-    if not isinstance(dec, list):
+    if not isinstance(dec, list):  # pragma: no cover
         raise TypeError("Unexpected data structure in input file.")
     return dec
 
 
 def decrypt(encrypted: str, passphrase: str) -> list[TwoFactorAuthDetails]:
+    """
+
+    Raises:
+        PermissionError
+    """
     try:
         dicts = _decrypt(encrypted, passphrase)
-        return [TwoFactorAuthDetails.load(d) for d in dicts]
+        return into_class(dicts, TwoFactorAuthDetails)
     except cryptography.exceptions.InvalidTag as e:
         # wrong passphrase!
         raise PermissionError("Invalid passphrase for file.") from e
@@ -53,58 +59,78 @@ def hash_string(data: Any) -> str:
     return sha256.hexdigest()
 
 
-tmp = Path("/tmp")
-tmp_file = tmp / ".2fas"
-
-# APPNAME is session specific but with global prefix for easy clean up
 PREFIX = "2fas:"
 
-if tmp_file.exists() and (session := tmp_file.read_text()) and session.startswith(PREFIX):
-    # existing session
-    APPNAME = session
-else:
-    # new session!
-    session = hash_string((time.time()))  # random enough for this purpose
-    APPNAME = f"{PREFIX}{session}"
-    tmp_file.write_text(APPNAME)
+
+class KeyringManager:
+    appname: str = ""
+    tmp_file = Path("/tmp") / ".2fas"
+
+    def __init__(self) -> None:
+        self._init()
+
+    def _init(self) -> None:
+        # so you can call init again to set active appname (for pytest)
+        tmp_file = self.tmp_file
+        # APPNAME is session specific but with global prefix for easy clean up
+
+        if tmp_file.exists() and (session := tmp_file.read_text()) and session.startswith(PREFIX):
+            # existing session
+            self.appname = session
+        else:
+            # new session!
+            session = hash_string((time.time()))  # random enough for this purpose
+            self.appname = f"{PREFIX}{session}"
+            tmp_file.write_text(self.appname)
+
+    @classmethod
+    def _retrieve_credentials(cls, filename: str, appname: str) -> Optional[str]:
+        return keyring.get_password(appname, hash_string(filename))
+
+    def retrieve_credentials(self, filename: str) -> Optional[str]:
+        return self._retrieve_credentials(filename, self.appname)
+
+    @classmethod
+    def _save_credentials(cls, filename: str, passphrase: str, appname: str) -> None:
+        keyring.set_password(appname, hash_string(filename), passphrase)
+
+    def save_credentials(self, filename: str) -> str:
+        passphrase = getpass.getpass("Passphrase? ")
+        self._save_credentials(filename, passphrase, self.appname)
+
+        return passphrase
+
+    @classmethod
+    def _delete_credentials(cls, filename: str, appname: str) -> None:
+        keyring.delete_password(appname, hash_string(filename))
+
+    def delete_credentials(self, filename: str) -> None:
+        self._delete_credentials(filename, self.appname)
+
+    @classmethod
+    def _cleanup_keyring(cls, appname: str) -> int:
+        kr: keyring.backends.SecretService.Keyring | KeyringBackend = keyring.get_keyring()
+        if not hasattr(kr, "get_preferred_collection"):  # pragma: no cover
+            warnings.warn(f"Can't clean up this keyring backend! {type(kr)}", category=RuntimeWarning)
+            return -1
+
+        collection = kr.get_preferred_collection()
+
+        # get old 2fas: keyring items:
+        return len(
+            [
+                item
+                for item in collection.get_all_items()
+                if (
+                    service := item.get_attributes().get("service", "")
+                )  # must have a 'service' attribute, otherwise it's unrelated
+                and service.startswith(PREFIX)  # must be a 2fas: service, otherwise it's unrelated
+                and service != appname  # must not be the currently active session
+            ]
+        )
+
+    def cleanup_keyring(self) -> None:
+        self._cleanup_keyring(self.appname)
 
 
-def retrieve_credentials(filename: str) -> Optional[str]:
-    return keyring.get_password(APPNAME, hash_string(filename))
-
-
-def save_credentials(filename: str) -> str:
-    passphrase = getpass("Passphrase? ")
-    keyring.set_password(APPNAME, hash_string(filename), passphrase)
-
-    return passphrase
-
-
-def cleanup_keyring() -> None:
-    import keyring.backends.SecretService
-
-    kr: keyring.backends.SecretService.Keyring | KeyringBackend = keyring.get_keyring()
-    if not hasattr(kr, "get_preferred_collection"):
-        print(f"Can't clean up this keyring backend! {type(kr)}", file=sys.stderr)  # todo: only if verbose
-        return
-
-    c = kr.get_preferred_collection()
-
-    # get old 2fas: keyring items:
-    relevant = [
-        _
-        for _ in c.get_all_items()
-        if (
-            service := _.get_attributes().get("service", "")
-        )  # must have a 'service' attribute, otherwise it's unrelated
-        and service.startswith(PREFIX)  # must be a 2fas: service, otherwise it's unrelated
-        and service != APPNAME  # must not be the currently active session
-    ]
-
-    print(
-        "removed",
-        len([_.delete() for _ in relevant]),
-        "old items",
-        # todo: only if verbose I guess
-        file=sys.stderr,
-    )
+keyring_manager = KeyringManager()
