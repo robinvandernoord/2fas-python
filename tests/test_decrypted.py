@@ -51,11 +51,11 @@ def test_load(services):
 def test_search_exact(services):
     found = services.find("Example 1")
     assert len(found) == 2
-    assert found == services["Example 1"]
+    assert list(found) == services["Example 1"]
 
 
 def test_search_fuzzy(services):
-    assert services.find() == services.all()
+    assert list(services.find()) == services.all()
 
     found = services.find("Example")
     assert len(found) == 4
@@ -68,3 +68,17 @@ def test_search_fuzzy(services):
 
     found = services.find("___")
     assert len(found) == 0
+
+    # search in value
+
+    found = services.find("@google")
+    assert len(found) == 2
+
+    found = services.find("Additional inof")  # fuzzy with typo
+    assert len(found) == 2
+
+    # test nested search:
+    found = services.find("1").find("other")
+    assert len(found) == 1
+
+    assert [_[1] for _ in services.generate()] == [_[1] for _ in services.find().generate()] == [_.generate() for _ in services]  # generate all

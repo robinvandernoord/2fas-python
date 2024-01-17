@@ -22,6 +22,9 @@ class TwoFactorStorage(typing.Generic[T_TwoFactorAuthDetails]):
         self._multidict = defaultdict(list)  # one name can map to multiple keys
         self.count = 0
 
+    def __len__(self) -> int:
+        return self.count
+
     def __bool__(self) -> bool:
         return self.count > 0
 
@@ -58,19 +61,25 @@ class TwoFactorStorage(typing.Generic[T_TwoFactorAuthDetails]):
             return flat
 
         # search in value:
+        # str is short, repr is json
         return [
             # search in value instead
             v
             for v in list(self)
-            if fuzzy_match(str(v).upper(), find) > fuzz_threshold
+            if fuzzy_match(repr(v).upper(), find) > fuzz_threshold
         ]
 
-    def find(self, target: Optional[str] = None, fuzz_threshold: int = 75) -> list[T_TwoFactorAuthDetails]:
+    def generate(self) -> list[tuple[str, str]]:
+        return [(_.name, _.generate()) for _ in self]
+
+    def find(
+        self, target: Optional[str] = None, fuzz_threshold: int = 75
+    ) -> "TwoFactorStorage[T_TwoFactorAuthDetails]":
         # first try exact match:
         if items := self._multidict.get(target or ""):
-            return items
+            return new_auth_storage(items)
         # else: fuzzy match:
-        return self._fuzzy_find(target, fuzz_threshold)
+        return new_auth_storage(self._fuzzy_find(target, fuzz_threshold))
 
     def all(self) -> list[T_TwoFactorAuthDetails]:
         return list(self)
@@ -83,13 +92,22 @@ class TwoFactorStorage(typing.Generic[T_TwoFactorAuthDetails]):
         return f"<TwoFactorStorage with {len(self._multidict)} keys and {self.count} entries>"
 
 
+def new_auth_storage(initial_items: list[T_TwoFactorAuthDetails] = None) -> TwoFactorStorage[T_TwoFactorAuthDetails]:
+    storage: TwoFactorStorage[T_TwoFactorAuthDetails] = TwoFactorStorage()
+
+    if initial_items:
+        storage.add(initial_items)
+
+    return storage
+
+
 def load_services(filename: str, _max_retries: int = 0) -> TwoFactorStorage[TwoFactorAuthDetails]:
     filepath = Path(filename)
     with filepath.open() as f:
         data_raw = f.read()
         data = json.loads(data_raw)
 
-    storage = TwoFactorStorage(TwoFactorAuthDetails)
+    storage: TwoFactorStorage[TwoFactorAuthDetails] = new_auth_storage()
 
     if decrypted := data["services"]:
         services = into_class(decrypted, TwoFactorAuthDetails)
