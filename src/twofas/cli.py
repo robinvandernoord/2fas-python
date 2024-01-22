@@ -215,3 +215,6 @@ def main(
 
     # todo: something like --add and --remove files
     # todo: better --help info
+
+
+# todo: self-update

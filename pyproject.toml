@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "2fas-python"
+name = "2fas"
 dynamic = ["version"]
 description = 'Unofficial implementation of 2fas for Python'
 readme = "README.md"
@@ -29,6 +29,7 @@ dependencies = [
     "keyring",
     "typer[all]",
     "questionary",
+    "rapidfuzz",
 ]
 
 [template.plugins.default]
