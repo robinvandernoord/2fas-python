@@ -95,7 +95,7 @@ class KeyringManager:
         keyring.set_password(appname, hash_string(filename), passphrase)
 
     def save_credentials(self, filename: str) -> str:
-        passphrase = getpass.getpass("Passphrase? ")
+        passphrase = getpass.getpass(f"Passphrase for '{filename}'? ")
         self._save_credentials(filename, passphrase, self.appname)
 
         return passphrase

@@ -1,14 +1,16 @@
+import os
 import sys
 import typing
 
-import configuraptor
 import questionary
 import rich
 import typer
 
+from .__about__ import __version__
 from ._security import keyring_manager
 from ._types import TwoFactorAuthDetails
 from .cli_settings import get_cli_setting, load_cli_settings, set_cli_setting
+from .cli_support import clear, exit_with_clear, generate_custom_style, state
 from .core import TwoFactorStorage, load_services
 
 app = typer.Typer()
@@ -16,60 +18,50 @@ app = typer.Typer()
 TwoFactorDetailStorage: typing.TypeAlias = TwoFactorStorage[TwoFactorAuthDetails]
 
 
-class AppState(configuraptor.TypedConfig, configuraptor.Singleton):
-    verbose: bool = False
-
-
-state = AppState.load({})
-
-
-def generate_custom_style(
-    main_color: str = "green",  # "#673ab7"
-    secondary_color: str = "#673ab7",  # "#f44336"
-) -> questionary.Style:
-    """
-    Reusable questionary style for all prompts of this tool.
-
-    Primary and secondary color can be changed, other styles stay the same for consistency.
-    """
-    return questionary.Style(
-        [
-            ("qmark", f"fg:{main_color} bold"),  # token in front of the question
-            ("question", "bold"),  # question text
-            ("answer", f"fg:{secondary_color} bold"),  # submitted answer text behind the question
-            ("pointer", f"fg:{main_color} bold"),  # pointer used in select and checkbox prompts
-            ("highlighted", f"fg:{main_color} bold"),  # pointed-at choice in select and checkbox prompts
-            ("selected", "fg:#cc5454"),  # style for a selected item of a checkbox
-            ("separator", "fg:#cc5454"),  # separator in lists
-            ("instruction", ""),  # user instructions for select, rawselect, checkbox
-            ("text", ""),  # plain text
-            ("disabled", "fg:#858585 italic"),  # disabled choices for select and checkbox prompts
-        ]
-    )
-
-
-def prepare_to_generate(filename: str) -> TwoFactorDetailStorage:
+def prepare_to_generate(filename: str = None) -> TwoFactorDetailStorage:
     keyring_manager.cleanup_keyring()
-    return load_services(filename)
+    return load_services(filename or default_2fas_file())
 
 
-def generate_all_totp(services: TwoFactorDetailStorage) -> None:
-    print("verbose", state.verbose)
+def print_for_service(service: TwoFactorAuthDetails) -> None:
+    service_name = service.name
+    code = service.generate()
 
-    for service_name, code in services.generate():
+    if state.verbose:
+        username = service.otp.account  # or .label ?
+        rich.print(f"- {service_name} ({username}): {code}")
+    else:
         rich.print(f"- {service_name}: {code}")
 
 
-def generate_one_otp(services: TwoFactorDetailStorage) -> None:
-    print("verbose", state.verbose)
+def generate_all_totp(services: TwoFactorDetailStorage) -> None:
+    for service in services:
+        print_for_service(service)
 
+
+def generate_one_otp(services: TwoFactorDetailStorage) -> None:
     while service_name := questionary.autocomplete(
         "Choose a service", choices=services.keys(), style=generate_custom_style()
     ).ask():
-        for service_name, code in services.find(service_name).generate():
-            rich.print(f"- {service_name}: {code}")
+        for service in services.find(service_name):
+            print_for_service(service)
 
 
+@clear
+def show_service_info(services: TwoFactorDetailStorage, about: str) -> None:
+    rich.print(services[about])
+
+
+def show_service_info_interactive(services: TwoFactorDetailStorage) -> None:
+    while about := questionary.select(
+        "About which service?", choices=services.keys(), style=generate_custom_style()
+    ).ask():
+        show_service_info(services, about)
+        if questionary.press_any_key_to_continue("Press 'Enter' to continue; Other keys to exit").ask() is None:
+            exit_with_clear(0)
+
+
+@clear
 def command_interactive(filename: str = None) -> None:
     if not filename:
         # get from settings or
@@ -77,12 +69,15 @@ def command_interactive(filename: str = None) -> None:
 
     services = prepare_to_generate(filename)
 
+    rich.print(f"Active file: [blue]{filename}[/blue]")
+
     match questionary.select(
         "What do you want to do?",
         choices=[
-            questionary.Choice("Generate a TOTP", "generate-one", shortcut_key="1"),
-            questionary.Choice("Generate all TOTPs", "generate-all", shortcut_key="2"),
-            questionary.Choice("Settings", "settings", shortcut_key="3"),
+            questionary.Choice("Generate a TOTP code", "generate-one", shortcut_key="1"),
+            questionary.Choice("Generate all TOTP codes", "generate-all", shortcut_key="2"),
+            questionary.Choice("Info about a Service", "see-info", shortcut_key="3"),
+            questionary.Choice("Settings", "settings", shortcut_key="4"),
             questionary.Choice("Exit", "exit", shortcut_key="0"),
         ],
         use_shortcuts=True,
@@ -94,18 +89,36 @@ def command_interactive(filename: str = None) -> None:
         case "generate-all":
             # show all
             return generate_all_totp(services)
+        case "see-info":
+            return show_service_info_interactive(services)
         case "settings":
-            print("todo: settings")
+            return command_settings(filename)
             # manage files
             # change specific settings
             # default file - choose from list of files
         case _:
-            exit(0)
+            exit_with_clear(0)
 
 
 def default_2fas_file() -> str:
-    print("todo: query filename or get from settings")
-    return "~/Nextcloud/2fa/2fas-backup-20240117132052.2fas"
+    settings = state.settings
+    if settings.default_file:
+        return settings.default_file
+
+    elif settings.files:
+        return settings.files[0]
+
+    filename: str = questionary.path(
+        "Path to .2fas file?",
+        validate=lambda it: it.endswith(".2fas"),
+        # file_filter=lambda it: it.endswith(".2fas"),
+        style=generate_custom_style(),
+    ).ask()
+
+    set_cli_setting("default-file", filename)
+    settings.add_file(filename)
+
+    return filename
 
 
 def default_2fas_services() -> TwoFactorDetailStorage:
@@ -113,18 +126,7 @@ def default_2fas_services() -> TwoFactorDetailStorage:
     return prepare_to_generate(filename)
 
 
-def command_generate(args: list[str]) -> None:
-    file_args = [_ for _ in args if _.endswith(".2fas")]
-    if len(file_args) > 1:
-        rich.print("[red]Err: can't work on multiple .2fas files![/red]", file=sys.stderr)
-        exit(1)
-
-    filename = file_args[0] if file_args else default_2fas_file()
-    print(f"todo: store {filename} in ~/.config/2fas settings")
-    print("todo: possibly set default in settings? ")
-
-    other_args = [_ for _ in args if not _.endswith(".2fas")]
-
+def command_generate(filename: str | None, other_args: list[str]) -> None:
     storage = prepare_to_generate(filename)
     found: list[TwoFactorAuthDetails] = []
 
@@ -136,7 +138,7 @@ def command_generate(args: list[str]) -> None:
         found.extend(storage.find(query))
 
     for twofa in found:
-        rich.print(f"- {twofa.name}:", twofa.generate())
+        print_for_service(twofa)
 
 
 def get_setting(key: str) -> None:
@@ -149,13 +151,54 @@ def set_setting(key: str, value: str) -> None:
 
 
 def list_settings() -> None:
-    settings = load_cli_settings()
     rich.print("Current settings:")
-    for key, value in settings.__dict__.items():
+    for key, value in state.settings.__dict__.items():
         if key.startswith("_"):
             continue
 
         rich.print(f"- {key}: {value}")
+
+
+@clear
+def set_default_file_interactive(filename: str) -> None:
+    new_filename = questionary.select(
+        "Pick a file:",
+        choices=state.settings.files or [],
+        default=filename,
+        style=generate_custom_style(),
+        use_shortcuts=True,
+    ).ask()
+
+    set_setting("default-file", new_filename)
+    prepare_to_generate(new_filename)  # ask for passphrase
+
+    return command_settings(new_filename)
+
+
+@clear
+def command_settings(filename: str) -> None:
+    rich.print(f"Active file: [blue]{filename}[/blue]")
+    action = questionary.select(
+        "What do you want to do?",
+        choices=[
+            questionary.Choice("Set default file", "set-default-file", shortcut_key="1"),
+            questionary.Choice("Manage files", "manage-files", shortcut_key="2"),
+            questionary.Choice("Back", "back", shortcut_key="3"),
+            questionary.Choice("Exit", "exit", shortcut_key="0"),
+        ],
+        use_shortcuts=True,
+        style=generate_custom_style(),
+    ).ask()
+
+    match action:
+        case "set-default-file":
+            set_default_file_interactive(filename)
+        case "manage-files":
+            print("todo: manage files")
+        case "back":
+            return command_interactive(filename)
+        case _:
+            exit_with_clear(1)
 
 
 def command_setting(args: list[str]) -> None:
@@ -181,11 +224,30 @@ def command_setting(args: list[str]) -> None:
             raise ValueError(f"Can't set setting '{other}'.")
 
 
+def command_update() -> None:
+    python = sys.executable
+    pip = f"{python} -m pip"
+    cmd = f"{pip} install --upgrade 2fas"
+    if os.system(cmd):  # nosec: B605
+        rich.print("[red] could not self-update [/red]")
+    else:
+        rich.print("[green] 2fas is at the latest version [/green]")
+
+
+def print_version() -> None:
+    rich.print(__version__)
+
+
 @app.command()
 def main(
     args: list[str] = typer.Argument(None),
+    # mutually exclusive actions:
     setting: bool = typer.Option(False, "--setting", "--settings", "-s"),
+    info: str = typer.Option(None, "--info", "-i"),
+    self_update: bool = typer.Option(False, "--self-update", "-u"),
     generate_all: bool = typer.Option(False, "--all", "-a"),
+    version: bool = typer.Option(False, "--version"),
+    # flags:
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:  # pragma: no cover
     """
@@ -199,22 +261,40 @@ def main(
 
     # 2fas --setting key value
     # 2fas --setting key=value
-    if verbose:
-        state.update(verbose=verbose)
+
+    # stateless actions:
+    if version:
+        return print_version()
+    elif self_update:
+        command_update()
+
+    # stateful:
+
+    settings = load_cli_settings()
+    state.update(verbose=settings.auto_verbose or verbose, settings=settings)
+
+    file_args = [_ for _ in args if _.endswith(".2fas")]
+    if len(file_args) > 1:
+        rich.print("[red]Err: can't work on multiple .2fas files![/red]", file=sys.stderr)
+        exit(1)
+
+    filename = file_args[0] if file_args else default_2fas_file()
+    settings.add_file(filename)
+
+    other_args = [_ for _ in args if not _.endswith(".2fas")]
 
     if setting:
         command_setting(args)
+    elif info:
+        services = prepare_to_generate(filename)
+        show_service_info(services, about=info)
     elif generate_all:
-        # todo: look for .2fas file in 'args' !
-        services = default_2fas_services()
+        services = prepare_to_generate(filename)
         generate_all_totp(services)
     elif args:
-        command_generate(args)
+        command_generate(filename, other_args)
     else:
-        command_interactive()
+        command_interactive(filename)
 
-    # todo: something like --add and --remove files
+    # todo: something to --remove files from history
     # todo: better --help info
-
-
-# todo: self-update

@@ -46,6 +46,16 @@ def test_overwrite_empty(empty_temp_config):
     assert settings.files == ["1", "2"]
     assert settings.default_file == "1"
 
+    settings.add_file("3", empty_temp_config)
+    settings.add_file("", empty_temp_config) # may NOT be written!
+    settings.add_file(None, empty_temp_config) # may NOT be written!
+
+    assert "3" in settings.files
+
+    reloaded_settings = load_cli_settings(empty_temp_config)
+    assert reloaded_settings.files == ["1", "2", "3"]
+
+
 
 def test_filled(filled_temp_config):
     settings = load_cli_settings(filled_temp_config)

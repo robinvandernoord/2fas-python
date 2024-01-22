@@ -17,6 +17,16 @@ CONFIG_KEY = "tool.2fas"
 class CliSettings(TypedConfig):
     files: list[str] | None
     default_file: str | None
+    auto_verbose: bool = False
+
+    def add_file(self, filename: str | None, _config_file: str | Path = DEFAULT_SETTINGS) -> None:
+        if not filename:
+            return
+
+        files = self.files or []
+        if filename not in files:
+            files.append(filename)
+            set_cli_setting("files", files, _config_file)
 
 
 def load_cli_settings(input_file: str | Path = DEFAULT_SETTINGS, **overwrite: Any) -> CliSettings:
@@ -34,7 +44,7 @@ def set_cli_setting(key: str, value: typing.Any, filename: str | Path = DEFAULT_
     key = convert_key(key)
 
     settings = load_cli_settings(filepath)
-    settings.update(**{key: value})
+    settings.update(**{key: value}, _convert_types=True)
 
     inner_data = asdict(
         settings,
