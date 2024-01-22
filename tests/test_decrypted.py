@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from src.twofas import load_services
@@ -24,6 +26,11 @@ def test_load(services):
     assert len(list(services)) == services.count == 4
 
     assert len(services.keys()) == 3  # 1 2 and 3
+
+    service = next(iter(services))
+    assert repr(service) == service.as_json() == json.dumps(service.as_dict(), indent=2)
+
+    assert str(service).startswith("<2fas")
 
     assert "3" in repr(services) and "4" in repr(services)
 
@@ -55,6 +62,9 @@ def test_search_exact(services):
 
 
 def test_search_fuzzy(services):
+    print(list(services.find()))
+    print(services.all())
+
     assert list(services.find()) == services.all()
 
     found = services.find("Example")

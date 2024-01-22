@@ -30,32 +30,36 @@ class TwoFactorStorage(typing.Generic[T_TwoFactorAuthDetails]):
 
     def add(self, entries: list[T_TwoFactorAuthDetails]) -> None:
         for entry in entries:
-            self._multidict[entry.name].append(entry)
+            name = (entry.name or "").lower()
+            self._multidict[name].append(entry)
 
         self.count += len(entries)
 
-    def __getitem__(self, item: str) -> list[T_TwoFactorAuthDetails]:
+    def __getitem__(self, item: str) -> "list[T_TwoFactorAuthDetails]":
         # class[property] syntax
-        return self._multidict[item]
+        return self._multidict[item.lower()]
 
     def keys(self) -> list[str]:
         return list(self._multidict.keys())
 
+    def items(self) -> typing.Generator[tuple[str, list[T_TwoFactorAuthDetails]], None, None]:
+        yield from self._multidict.items()
+
     def _fuzzy_find(self, find: typing.Optional[str], fuzz_threshold: int) -> list[T_TwoFactorAuthDetails]:
-        if find is None:
+        if not find:
             # don't loop
             return list(self)
 
         all_items = self._multidict.items()
 
-        find = find.upper()
+        find = find.lower()
         # if nothing found exactly, try again but fuzzy (could be slower)
         # search in key:
         fuzzy = [
             # search in key
             v
             for k, v in all_items
-            if fuzzy_match(k.upper(), find) > fuzz_threshold
+            if fuzzy_match(k.lower(), find) > fuzz_threshold
         ]
         if fuzzy and (flat := flatten(fuzzy)):
             return flat
@@ -66,7 +70,7 @@ class TwoFactorStorage(typing.Generic[T_TwoFactorAuthDetails]):
             # search in value instead
             v
             for v in list(self)
-            if fuzzy_match(repr(v).upper(), find) > fuzz_threshold
+            if fuzzy_match(repr(v).lower(), find) > fuzz_threshold
         ]
 
     def generate(self) -> list[tuple[str, str]]:
@@ -75,8 +79,9 @@ class TwoFactorStorage(typing.Generic[T_TwoFactorAuthDetails]):
     def find(
         self, target: Optional[str] = None, fuzz_threshold: int = 75
     ) -> "TwoFactorStorage[T_TwoFactorAuthDetails]":
+        target = (target or "").lower()
         # first try exact match:
-        if items := self._multidict.get(target or ""):
+        if items := self._multidict.get(target):
             return new_auth_storage(items)
         # else: fuzzy match:
         return new_auth_storage(self._fuzzy_find(target, fuzz_threshold))
@@ -102,7 +107,7 @@ def new_auth_storage(initial_items: list[T_TwoFactorAuthDetails] = None) -> TwoF
 
 
 def load_services(filename: str, _max_retries: int = 0) -> TwoFactorStorage[TwoFactorAuthDetails]:
-    filepath = Path(filename)
+    filepath = Path(filename).expanduser()
     with filepath.open() as f:
         data_raw = f.read()
         data = json.loads(data_raw)

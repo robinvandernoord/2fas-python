@@ -38,7 +38,7 @@ class TwoFactorAuthDetails(TypedConfig):
     otp: OtpDetails
     order: OrderDetails
     icon: IconDetails
-    groupId: Optional[str] = None # todo: groups are currently not supported!
+    groupId: Optional[str] = None  # todo: groups are currently not supported!
 
     _topt: Optional[TOTP] = None  # lazily loaded when calling .totp or .generate()
 

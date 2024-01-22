@@ -27,6 +27,8 @@ dependencies = [
     "configuraptor",
     "PyOTP",
     "keyring",
+    "typer[all]",
+    "questionary",
 ]
 
 [template.plugins.default]
@@ -45,8 +47,7 @@ dev = [
 
 
 [project.scripts]
-#2fas = "twofas.cli:app"
-2fas = "twofas.main:main"
+2fas = "twofas.cli:app"
 
 [project.urls]
 Documentation = "https://github.com/robinvandernoord/2fas-python#readme"
