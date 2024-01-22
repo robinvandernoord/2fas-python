@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from configuraptor.errors import ConfigErrorExtraKey
 
-from src.twofas.cli_settings import load_cli_settings, get_cli_setting, set_cli_setting
+from src.twofas.cli_settings import get_cli_setting, load_cli_settings, set_cli_setting
 
 
 @pytest.fixture
@@ -61,8 +61,11 @@ def test_overwrite_filled(filled_temp_config):
 
 
 def test_get_setting(filled_temp_config):
-    assert get_cli_setting("default_file", filled_temp_config) == get_cli_setting("default-file",
-                                                                                  filled_temp_config) == "a"
+    assert (
+        get_cli_setting("default_file", filled_temp_config)
+        == get_cli_setting("default-file", filled_temp_config)
+        == "a"
+    )
 
     with pytest.raises(AttributeError):
         assert not get_cli_setting("nothing")

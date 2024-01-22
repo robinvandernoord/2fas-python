@@ -2,6 +2,7 @@ import pytest
 
 from src.twofas import load_services
 from src.twofas._security import KeyringManager, keyring_manager
+
 from ._shared import CWD
 
 FILENAME = str(CWD / "2fas-demo-pass.2fas")
@@ -22,19 +23,19 @@ def clean_keyring():
 @pytest.fixture
 def getpass_wrong(clean_keyring, monkeypatch):
     """Did the file we wrote actually become json."""
-    monkeypatch.setattr('getpass.getpass', lambda _: "***")
+    monkeypatch.setattr("getpass.getpass", lambda _: "***")
 
 
 @pytest.fixture
 def getpass_correct(clean_keyring, monkeypatch):
     """Did the file we wrote actually become json."""
-    monkeypatch.setattr('getpass.getpass', lambda _: PASSWORD)
+    monkeypatch.setattr("getpass.getpass", lambda _: PASSWORD)
 
 
 @pytest.fixture
 def getpass_empty(monkeypatch):
     """Did the file we wrote actually become json."""
-    monkeypatch.setattr('getpass.getpass', lambda _: "")
+    monkeypatch.setattr("getpass.getpass", lambda _: "")
 
 
 def test_wrong_pass(getpass_wrong):

@@ -1,7 +1,9 @@
 import sys
 import typing
 
+import configuraptor
 import questionary
+import rich
 import typer
 
 from ._security import keyring_manager
@@ -12,6 +14,13 @@ from .core import TwoFactorStorage, load_services
 app = typer.Typer()
 
 TwoFactorDetailStorage: typing.TypeAlias = TwoFactorStorage[TwoFactorAuthDetails]
+
+
+class AppState(configuraptor.TypedConfig, configuraptor.Singleton):
+    verbose: bool = False
+
+
+state = AppState.load({})
 
 
 def generate_custom_style(
@@ -45,18 +54,20 @@ def prepare_to_generate(filename: str) -> TwoFactorDetailStorage:
 
 
 def generate_all_totp(services: TwoFactorDetailStorage) -> None:
-    # todo: verbose?
+    print("verbose", state.verbose)
+
     for service_name, code in services.generate():
-        print(f"- {service_name}: {code}")
+        rich.print(f"- {service_name}: {code}")
 
 
 def generate_one_otp(services: TwoFactorDetailStorage) -> None:
-    # todo: verbose?
+    print("verbose", state.verbose)
+
     while service_name := questionary.autocomplete(
         "Choose a service", choices=services.keys(), style=generate_custom_style()
     ).ask():
         for service_name, code in services.find(service_name).generate():
-            print(f"- {service_name}: {code}")
+            rich.print(f"- {service_name}: {code}")
 
 
 def command_interactive(filename: str = None) -> None:
@@ -105,10 +116,12 @@ def default_2fas_services() -> TwoFactorDetailStorage:
 def command_generate(args: list[str]) -> None:
     file_args = [_ for _ in args if _.endswith(".2fas")]
     if len(file_args) > 1:
-        print("Err: can't work on multiple .2fas files!", file=sys.stderr)
+        rich.print("[red]Err: can't work on multiple .2fas files![/red]", file=sys.stderr)
         exit(1)
 
     filename = file_args[0] if file_args else default_2fas_file()
+    print(f"todo: store {filename} in ~/.config/2fas settings")
+    print("todo: possibly set default in settings? ")
 
     other_args = [_ for _ in args if not _.endswith(".2fas")]
 
@@ -123,12 +136,12 @@ def command_generate(args: list[str]) -> None:
         found.extend(storage.find(query))
 
     for twofa in found:
-        print(f"- {twofa.name}:", twofa.generate())
+        rich.print(f"- {twofa.name}:", twofa.generate())
 
 
 def get_setting(key: str) -> None:
     value = get_cli_setting(key)
-    print(f"- {key}: {value}")
+    rich.print(f"- {key}: {value}")
 
 
 def set_setting(key: str, value: str) -> None:
@@ -137,12 +150,12 @@ def set_setting(key: str, value: str) -> None:
 
 def list_settings() -> None:
     settings = load_cli_settings()
-    print("Current settings:")
+    rich.print("Current settings:")
     for key, value in settings.__dict__.items():
         if key.startswith("_"):
             continue
 
-        print(f"- {key}: {value}")
+        rich.print(f"- {key}: {value}")
 
 
 def command_setting(args: list[str]) -> None:
@@ -187,12 +200,12 @@ def main(
     # 2fas --setting key value
     # 2fas --setting key=value
     if verbose:
-        # todo: global state for stuff like this?
-        print("verbosity++")
+        state.update(verbose=verbose)
 
     if setting:
         command_setting(args)
     elif generate_all:
+        # todo: look for .2fas file in 'args' !
         services = default_2fas_services()
         generate_all_totp(services)
     elif args:

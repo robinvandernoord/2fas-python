@@ -5,6 +5,7 @@ import pytest
 from src.twofas import load_services
 from src.twofas._types import TwoFactorAuthDetails
 from src.twofas.core import TwoFactorStorage
+
 from ._shared import CWD
 
 FILENAME = str(CWD / "2fas-demo-nopass.2fas")
@@ -26,6 +27,12 @@ def test_load(services):
     assert len(list(services)) == services.count == 4
 
     assert len(services.keys()) == 3  # 1 2 and 3
+
+    for name, detail_list in services.items():
+        assert isinstance(name, str)
+        assert isinstance(detail_list, list)
+        assert detail_list  # why would it return an empty list?
+        assert isinstance(detail_list[0], TwoFactorAuthDetails)
 
     service = next(iter(services))
     assert repr(service) == service.as_json() == json.dumps(service.as_dict(), indent=2)
@@ -51,7 +58,7 @@ def test_load(services):
 
     example_2 = example_2[0]
 
-    assert str(example_2.generate_int()).rjust(6, '0') == example_2.generate()
+    assert str(example_2.generate_int()).rjust(6, "0") == example_2.generate()
     assert example_2.generate_int() == int(example_2.generate())
 
 
@@ -91,4 +98,8 @@ def test_search_fuzzy(services):
     found = services.find("1").find("other")
     assert len(found) == 1
 
-    assert [_[1] for _ in services.generate()] == [_[1] for _ in services.find().generate()] == [_.generate() for _ in services]  # generate all
+    assert (
+        [_[1] for _ in services.generate()]
+        == [_[1] for _ in services.find().generate()]
+        == [_.generate() for _ in services]
+    )  # generate all
