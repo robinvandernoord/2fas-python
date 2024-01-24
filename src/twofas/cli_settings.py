@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 import tomli_w
-from configuraptor import TypedConfig, asdict
+from configuraptor import TypedConfig, asdict, singleton
 from configuraptor.core import convert_key
 
 config = Path("~/.config").expanduser()
@@ -14,7 +14,15 @@ DEFAULT_SETTINGS.touch(exist_ok=True)
 CONFIG_KEY = "tool.2fas"
 
 
-class CliSettings(TypedConfig):
+def expand_path(file: str | Path) -> str:
+    return str(Path(file).expanduser())
+
+
+def expand_paths(paths: list[str]) -> list[str]:
+    return [expand_path(f) for f in paths]
+
+
+class CliSettings(TypedConfig, singleton.Singleton):
     files: list[str] | None
     default_file: str | None
     auto_verbose: bool = False
@@ -23,10 +31,27 @@ class CliSettings(TypedConfig):
         if not filename:
             return
 
+        filename = expand_path(filename)
+
         files = self.files or []
         if filename not in files:
             files.append(filename)
-            set_cli_setting("files", files, _config_file)
+
+            set_cli_setting("files", expand_paths(files), _config_file)
+
+        self.files = expand_paths(files)
+
+    def remove_file(self, filename: str | list[str], _config_file: str | Path = DEFAULT_SETTINGS) -> None:
+        if isinstance(filename, str | Path):
+            filename = [filename]
+
+        filename = set(expand_paths(filename))
+
+        files = [_ for _ in (self.files or []) if _ not in filename]
+
+        set_cli_setting("files", expand_paths(files), _config_file)
+
+        self.files = expand_paths(files)
 
 
 def load_cli_settings(input_file: str | Path = DEFAULT_SETTINGS, **overwrite: Any) -> CliSettings:

@@ -7,6 +7,8 @@ from configuraptor.errors import ConfigErrorExtraKey
 from src.twofas.cli_settings import get_cli_setting, load_cli_settings, set_cli_setting
 
 
+# todo: deal with Singleton CLISettings
+
 @pytest.fixture
 def empty_temp_config():
     with tempfile.NamedTemporaryFile(suffix=".toml") as f:
@@ -47,14 +49,13 @@ def test_overwrite_empty(empty_temp_config):
     assert settings.default_file == "1"
 
     settings.add_file("3", empty_temp_config)
-    settings.add_file("", empty_temp_config) # may NOT be written!
-    settings.add_file(None, empty_temp_config) # may NOT be written!
+    settings.add_file("", empty_temp_config)  # may NOT be written!
+    settings.add_file(None, empty_temp_config)  # may NOT be written!
 
     assert "3" in settings.files
 
     reloaded_settings = load_cli_settings(empty_temp_config)
     assert reloaded_settings.files == ["1", "2", "3"]
-
 
 
 def test_filled(filled_temp_config):

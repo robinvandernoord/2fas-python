@@ -9,7 +9,12 @@ import typer
 from .__about__ import __version__
 from ._security import keyring_manager
 from ._types import TwoFactorAuthDetails
-from .cli_settings import get_cli_setting, load_cli_settings, set_cli_setting
+from .cli_settings import (
+    expand_path,
+    get_cli_setting,
+    load_cli_settings,
+    set_cli_setting,
+)
 from .cli_support import clear, exit_with_clear, generate_custom_style, state
 from .core import TwoFactorStorage, load_services
 
@@ -40,9 +45,12 @@ def generate_all_totp(services: TwoFactorDetailStorage) -> None:
 
 
 def generate_one_otp(services: TwoFactorDetailStorage) -> None:
-    while service_name := questionary.autocomplete(
-        "Choose a service", choices=services.keys(), style=generate_custom_style()
-    ).ask():
+    while (
+        service_name := questionary.autocomplete(
+            "Choose a service", choices=services.keys(), style=generate_custom_style()
+        ).ask()
+        or []
+    ):
         for service in services.find(service_name):
             print_for_service(service)
 
@@ -53,9 +61,12 @@ def show_service_info(services: TwoFactorDetailStorage, about: str) -> None:
 
 
 def show_service_info_interactive(services: TwoFactorDetailStorage) -> None:
-    while about := questionary.select(
-        "About which service?", choices=services.keys(), style=generate_custom_style()
-    ).ask():
+    while (
+        about := questionary.select(
+            "About which service?", choices=services.keys(), style=generate_custom_style()
+        ).ask()
+        or []
+    ):
         show_service_info(services, about)
         if questionary.press_any_key_to_continue("Press 'Enter' to continue; Other keys to exit").ask() is None:
             exit_with_clear(0)
@@ -93,11 +104,27 @@ def command_interactive(filename: str = None) -> None:
             return show_service_info_interactive(services)
         case "settings":
             return command_settings(filename)
-            # manage files
-            # change specific settings
-            # default file - choose from list of files
         case _:
             exit_with_clear(0)
+
+
+def add_2fas_file() -> str:
+    settings = state.settings
+
+    filename: str = questionary.path(
+        "Path to .2fas file?",
+        validate=lambda it: it.endswith(".2fas"),
+        # file_filter=lambda it: it.endswith(".2fas"),
+        style=generate_custom_style(),
+    ).ask()
+
+    if filename is None:
+        exit_with_clear(0)
+
+    filename = expand_path(filename)
+
+    settings.add_file(filename)
+    return filename
 
 
 def default_2fas_file() -> str:
@@ -108,17 +135,10 @@ def default_2fas_file() -> str:
     elif settings.files:
         return settings.files[0]
 
-    filename: str = questionary.path(
-        "Path to .2fas file?",
-        validate=lambda it: it.endswith(".2fas"),
-        # file_filter=lambda it: it.endswith(".2fas"),
-        style=generate_custom_style(),
-    ).ask()
-
+    filename = add_2fas_file()
     set_cli_setting("default-file", filename)
-    settings.add_file(filename)
 
-    return filename
+    return expand_path(filename)
 
 
 def default_2fas_services() -> TwoFactorDetailStorage:
@@ -169,10 +189,27 @@ def set_default_file_interactive(filename: str) -> None:
         use_shortcuts=True,
     ).ask()
 
+    if new_filename is None:
+        return command_settings(filename)
+
     set_setting("default-file", new_filename)
     prepare_to_generate(new_filename)  # ask for passphrase
 
     return command_settings(new_filename)
+
+
+@clear
+def command_manage_files(filename: str = None):
+    to_remove = questionary.checkbox(
+        "Which files do you want to remove?",
+        choices=state.settings.files or [],
+        style=generate_custom_style(),
+    ).ask()
+    if to_remove is not None:
+        state.settings.remove_file(to_remove)
+
+    if filename:
+        return command_settings(filename)
 
 
 @clear
@@ -182,8 +219,9 @@ def command_settings(filename: str) -> None:
         "What do you want to do?",
         choices=[
             questionary.Choice("Set default file", "set-default-file", shortcut_key="1"),
-            questionary.Choice("Manage files", "manage-files", shortcut_key="2"),
-            questionary.Choice("Back", "back", shortcut_key="3"),
+            questionary.Choice("Add file", "add-file", shortcut_key="2"),
+            questionary.Choice("Remove files", "remove-files", shortcut_key="3"),
+            questionary.Choice("Back", "back", shortcut_key="4"),
             questionary.Choice("Exit", "exit", shortcut_key="0"),
         ],
         use_shortcuts=True,
@@ -193,8 +231,11 @@ def command_settings(filename: str) -> None:
     match action:
         case "set-default-file":
             set_default_file_interactive(filename)
-        case "manage-files":
-            print("todo: manage files")
+        case "add-file":
+            prepare_to_generate(add_2fas_file())
+            return command_settings(filename)
+        case "remove-files":
+            command_manage_files(filename)
         case "back":
             return command_interactive(filename)
         case _:
@@ -247,6 +288,7 @@ def main(
     self_update: bool = typer.Option(False, "--self-update", "-u"),
     generate_all: bool = typer.Option(False, "--all", "-a"),
     version: bool = typer.Option(False, "--version"),
+    remove: bool = typer.Option(False, "--remove", "-r"),
     # flags:
     verbose: bool = typer.Option(False, "--verbose", "-v"),
 ) -> None:  # pragma: no cover
@@ -278,13 +320,17 @@ def main(
         rich.print("[red]Err: can't work on multiple .2fas files![/red]", file=sys.stderr)
         exit(1)
 
-    filename = file_args[0] if file_args else default_2fas_file()
+    filename = expand_path(file_args[0] if file_args else default_2fas_file())
     settings.add_file(filename)
 
     other_args = [_ for _ in args if not _.endswith(".2fas")]
 
     if setting:
         command_setting(args)
+    elif remove and file_args:
+        settings.remove_file(file_args[0])
+    elif remove:
+        command_manage_files()
     elif info:
         services = prepare_to_generate(filename)
         show_service_info(services, about=info)
@@ -296,5 +342,4 @@ def main(
     else:
         command_interactive(filename)
 
-    # todo: something to --remove files from history
     # todo: better --help info
