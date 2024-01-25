@@ -43,6 +43,7 @@ dev = [
     "hatch",
     "python-semantic-release<8",
     "su6[all]",
+    "pytest-mypy-testing",
     "edwh",
 ]
 

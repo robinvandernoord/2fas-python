@@ -29,7 +29,7 @@ def clear(fn: typing.Callable[P, R]) -> typing.Callable[P, R]:
 
 
 @typing.overload
-def clear(fn: None = None) -> typing.Callable[[typing.Callable[P, R]], R]:
+def clear(fn: None = None) -> typing.Callable[[typing.Callable[P, R]], typing.Callable[P, R]]:
     """
     When calling clear without parens, you'll get the same callable back later.
     """
@@ -37,7 +37,7 @@ def clear(fn: None = None) -> typing.Callable[[typing.Callable[P, R]], R]:
 
 def clear(
     fn: typing.Callable[P, R] | None = None
-) -> typing.Callable[P, R] | typing.Callable[[typing.Callable[P, R]], R]:  # pragma: no cover
+) -> typing.Callable[P, R] | typing.Callable[[typing.Callable[P, R]], typing.Callable[P, R]]:  # pragma: no cover
     """
     Clear the screen before executing a function.
 
@@ -56,7 +56,7 @@ def clear(
 
         return inner
     else:
-        return clear  # type: ignore
+        return clear
 
 
 @clear

@@ -2,15 +2,20 @@ import tempfile
 from pathlib import Path
 
 import pytest
+from configuraptor import Singleton
 from configuraptor.errors import ConfigErrorExtraKey
 
 from src.twofas.cli_settings import get_cli_setting, load_cli_settings, set_cli_setting
 
 
-# todo: deal with Singleton CLISettings
+
+@pytest.fixture()
+def reset_state():
+    Singleton.clear()
+
 
 @pytest.fixture
-def empty_temp_config():
+def empty_temp_config(reset_state):
     with tempfile.NamedTemporaryFile(suffix=".toml") as f:
         yield Path(f.name)
 
@@ -28,7 +33,7 @@ def filled_temp_config(empty_temp_config):
     yield empty_temp_config
 
 
-def test_missing():
+def test_missing(reset_state):
     settings = load_cli_settings("/tmp/2fas-test-missing.toml")
 
     assert not settings.files

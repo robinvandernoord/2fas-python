@@ -45,12 +45,10 @@ def generate_all_totp(services: TwoFactorDetailStorage) -> None:
 
 
 def generate_one_otp(services: TwoFactorDetailStorage) -> None:
-    while (
-        service_name := questionary.autocomplete(
-            "Choose a service", choices=services.keys(), style=generate_custom_style()
-        ).ask()
-        or []
-    ):
+    service_name: str
+    while service_name := questionary.autocomplete(
+        "Choose a service", choices=services.keys(), style=generate_custom_style()
+    ).ask():
         for service in services.find(service_name):
             print_for_service(service)
 
@@ -61,12 +59,10 @@ def show_service_info(services: TwoFactorDetailStorage, about: str) -> None:
 
 
 def show_service_info_interactive(services: TwoFactorDetailStorage) -> None:
-    while (
-        about := questionary.select(
-            "About which service?", choices=services.keys(), style=generate_custom_style()
-        ).ask()
-        or []
-    ):
+    about: str
+    while about := questionary.select(
+        "About which service?", choices=services.keys(), style=generate_custom_style()
+    ).ask():
         show_service_info(services, about)
         if questionary.press_any_key_to_continue("Press 'Enter' to continue; Other keys to exit").ask() is None:
             exit_with_clear(0)
@@ -84,13 +80,14 @@ def command_interactive(filename: str = None) -> None:
 
     match questionary.select(
         "What do you want to do?",
-        choices=[
-            questionary.Choice("Generate a TOTP code", "generate-one", shortcut_key="1"),
-            questionary.Choice("Generate all TOTP codes", "generate-all", shortcut_key="2"),
-            questionary.Choice("Info about a Service", "see-info", shortcut_key="3"),
-            questionary.Choice("Settings", "settings", shortcut_key="4"),
-            questionary.Choice("Exit", "exit", shortcut_key="0"),
-        ],
+        choices=generate_choices(
+            {
+                "Generate a TOTP code": "generate-one",
+                "Generate all TOTP codes": "generate-all",
+                "Info about a Service": "see-info",
+                "Settings": "settings",
+            }
+        ),
         use_shortcuts=True,
         style=generate_custom_style(),
     ).ask():
@@ -198,8 +195,8 @@ def set_default_file_interactive(filename: str) -> None:
     return command_settings(new_filename)
 
 
-@clear
-def command_manage_files(filename: str = None):
+@clear()
+def command_manage_files(filename: str = None) -> None:
     to_remove = questionary.checkbox(
         "Which files do you want to remove?",
         choices=state.settings.files or [],
@@ -211,33 +208,80 @@ def command_manage_files(filename: str = None):
     if filename:
         return command_settings(filename)
 
+    return None
+
+
+def generate_choices(choices: dict[str, str], with_exit: bool = True) -> list[questionary.Choice]:
+    result = [
+        questionary.Choice(key, value, shortcut_key=str(idx)) for idx, (key, value) in enumerate(choices.items(), 1)
+    ]
+
+    if with_exit:
+        result.append(questionary.Choice("Exit", "exit", shortcut_key="0"))
+
+    return result
+
+
+@clear
+def toggle_autoverbose(filename: str) -> None:
+    settings = state.settings
+
+    is_enabled = "yes" if settings.auto_verbose else "no"
+    color = "green" if settings.auto_verbose else "red"
+    rich.print(f"[blue]Auto Verbose enabled:[/blue] [{color}]{is_enabled}[/{color}]")
+
+    text_enabled = "Enable"
+    new_value = (
+        questionary.select(
+            "Use Auto Verbose?",
+            choices=[
+                text_enabled,
+                "Disable",
+            ],
+            style=generate_custom_style(),
+        ).ask()
+        == text_enabled
+    )
+
+    settings.auto_verbose = new_value
+    state.verbose = new_value
+    set_cli_setting("auto_verbose", new_value)
+    return command_settings(filename)
+
 
 @clear
 def command_settings(filename: str) -> None:
     rich.print(f"Active file: [blue]{filename}[/blue]")
     action = questionary.select(
         "What do you want to do?",
-        choices=[
-            questionary.Choice("Set default file", "set-default-file", shortcut_key="1"),
-            questionary.Choice("Add file", "add-file", shortcut_key="2"),
-            questionary.Choice("Remove files", "remove-files", shortcut_key="3"),
-            questionary.Choice("Back", "back", shortcut_key="4"),
-            questionary.Choice("Exit", "exit", shortcut_key="0"),
-        ],
+        choices=generate_choices(
+            {
+                "Show current settings": "show-settings",
+                "Set default file": "set-default-file",
+                "Add file": "add-file",
+                "Remove files": "remove-files",
+                "Toggle auto-verbose": "auto-verbose",
+                "Back": "back",
+            }
+        ),
         use_shortcuts=True,
         style=generate_custom_style(),
     ).ask()
 
     match action:
+        case "show-settings":
+            return command_setting([])
         case "set-default-file":
             set_default_file_interactive(filename)
         case "add-file":
             prepare_to_generate(add_2fas_file())
             return command_settings(filename)
         case "remove-files":
-            command_manage_files(filename)
+            return command_manage_files(filename)
         case "back":
             return command_interactive(filename)
+        case "auto-verbose":
+            return toggle_autoverbose(filename)
         case _:
             exit_with_clear(1)
 
@@ -283,14 +327,34 @@ def print_version() -> None:
 def main(
     args: list[str] = typer.Argument(None),
     # mutually exclusive actions:
-    setting: bool = typer.Option(False, "--setting", "--settings", "-s"),
-    info: str = typer.Option(None, "--info", "-i"),
-    self_update: bool = typer.Option(False, "--self-update", "-u"),
-    generate_all: bool = typer.Option(False, "--all", "-a"),
-    version: bool = typer.Option(False, "--version"),
-    remove: bool = typer.Option(False, "--remove", "-r"),
+    setting: bool = typer.Option(
+        False,
+        "--setting",
+        "--settings",
+        "-s",
+        help="Use `--setting` without an argument to see all settings. "
+        "Use `--setting <name>` to see the current value of a setting. "
+        "Use `--setting <name> <value>` to update a setting.",
+    ),
+    info: str = typer.Option(
+        None, "--info", "-i", help="`--info <service>` show all known info about a TOTP service from your .2fas file."
+    ),
+    self_update: bool = typer.Option(
+        False, "--self-update", "-u", help="Try to update the 2fas tool to the latest version."
+    ),
+    generate_all: bool = typer.Option(False, "--all", "-a", help="Generate all TOTP codes from the active file."),
+    version: bool = typer.Option(False, "--version", help="Show the current version of the 2fas cli tool."),
+    remove: bool = typer.Option(
+        False, "--remove", "--rm", "-r", help="`--remove <filename>` to remove a .2fas file from the known files"
+    ),
     # flags:
-    verbose: bool = typer.Option(False, "--verbose", "-v"),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Show more details (e.g. the username for a TOTP service). "
+        "You can use `auto-verbose` in settings to always show more info.",
+    ),
 ) -> None:  # pragma: no cover
     """
     Cli entrypoint.
@@ -341,5 +405,3 @@ def main(
         command_generate(filename, other_args)
     else:
         command_interactive(filename)
-
-    # todo: better --help info
