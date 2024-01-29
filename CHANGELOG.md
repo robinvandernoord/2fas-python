@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v1.0.1 (2024-01-29)
+
+### Feature
+
+* --version now also prints lib2fas library version ([`4899a83`](https://github.com/robinvandernoord/2fas-python/commit/4899a836acf216b0584c4f9224d1ec14662b678f))
+
 ## v1.0.0 (2024-01-29)
 
 ### Fix
