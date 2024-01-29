@@ -394,7 +394,10 @@ def print_version() -> None:
     """
     --version prints the currently installed version of this library.
     """
-    rich.print(__version__)
+    from lib2fas.__about__ import __version__ as core_version
+
+    rich.print("CLI version: ", __version__)
+    rich.print("lib2fas version: ", core_version)
 
 
 @app.command()
