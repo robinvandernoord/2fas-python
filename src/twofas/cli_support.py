@@ -1,3 +1,7 @@
+"""
+This file contains helpers for the cli.
+"""
+
 import os
 import typing
 
@@ -11,6 +15,10 @@ from .cli_settings import CliSettings
 
 @beautify
 class AppState(configuraptor.TypedConfig, configuraptor.Singleton):
+    """
+    Global state (settings from config + run-specific variables such as --verbose).
+    """
+
     verbose: bool = False
     settings: CliSettings = postpone()
 
@@ -61,6 +69,9 @@ def clear(
 
 @clear
 def exit_with_clear(status_code: int) -> Never:  # pragma: no cover
+    """
+    First clear the screen with the @clear decorator, then exit with a specific exit code.
+    """
     exit(status_code)
 
 
@@ -87,3 +98,19 @@ def generate_custom_style(
             ("disabled", "fg:#858585 italic"),  # disabled choices for select and checkbox prompts
         ]
     )
+
+
+def generate_choices(choices: dict[str, str], with_exit: bool = True) -> list[questionary.Choice]:
+    """
+    Turn a dict of label -> value items into a list of Choices with an automatic shortcut key (1 - 9).
+
+    If with_exit is True, an option with shortcut key 0 will be added to quit the program.
+    """
+    result = [
+        questionary.Choice(key, value, shortcut_key=str(idx)) for idx, (key, value) in enumerate(choices.items(), 1)
+    ]
+
+    if with_exit:
+        result.append(questionary.Choice("Exit", "exit", shortcut_key="0"))
+
+    return result

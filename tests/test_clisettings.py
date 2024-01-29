@@ -8,7 +8,6 @@ from configuraptor.errors import ConfigErrorExtraKey
 from src.twofas.cli_settings import get_cli_setting, load_cli_settings, set_cli_setting
 
 
-
 @pytest.fixture()
 def reset_state():
     Singleton.clear()
@@ -61,6 +60,16 @@ def test_overwrite_empty(empty_temp_config):
 
     reloaded_settings = load_cli_settings(empty_temp_config)
     assert reloaded_settings.files == ["1", "2", "3"]
+
+
+def test_remove_file(empty_temp_config):
+    settings = load_cli_settings(empty_temp_config, files=["1", "2"], default_file="1")
+
+    assert "1" in settings.files
+    assert settings.default_file == "1"
+    settings.remove_file("1", empty_temp_config)
+    assert "1" not in settings.files
+    assert settings.default_file != "1"
 
 
 def test_filled(filled_temp_config):

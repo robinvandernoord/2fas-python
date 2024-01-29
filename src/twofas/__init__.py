@@ -1,3 +1,7 @@
-from .core import load_services
+"""
+Entrypoint which exposes app.
+"""
 
-__all__ = ["load_services"]
+from .cli import app
+
+__all__ = ["app"]

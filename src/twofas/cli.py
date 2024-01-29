@@ -1,3 +1,7 @@
+"""
+This file contains the Typer CLI.
+"""
+
 import os
 import sys
 import typing
@@ -5,18 +9,24 @@ import typing
 import questionary
 import rich
 import typer
+from lib2fas._security import keyring_manager
+from lib2fas._types import TwoFactorAuthDetails
+from lib2fas.core import TwoFactorStorage, load_services
 
 from .__about__ import __version__
-from ._security import keyring_manager
-from ._types import TwoFactorAuthDetails
 from .cli_settings import (
     expand_path,
     get_cli_setting,
     load_cli_settings,
     set_cli_setting,
 )
-from .cli_support import clear, exit_with_clear, generate_custom_style, state
-from .core import TwoFactorStorage, load_services
+from .cli_support import (
+    clear,
+    exit_with_clear,
+    generate_choices,
+    generate_custom_style,
+    state,
+)
 
 app = typer.Typer()
 
@@ -24,11 +34,17 @@ TwoFactorDetailStorage: typing.TypeAlias = TwoFactorStorage[TwoFactorAuthDetails
 
 
 def prepare_to_generate(filename: str = None) -> TwoFactorDetailStorage:
+    """
+    Clear old keyring entries (from previous sessions) and decrypt the selected 2fas file.
+    """
     keyring_manager.cleanup_keyring()
     return load_services(filename or default_2fas_file())
 
 
 def print_for_service(service: TwoFactorAuthDetails) -> None:
+    """
+    Print the name, current TOTP code and optionally username for a specific service.
+    """
     service_name = service.name
     code = service.generate()
 
@@ -40,11 +56,17 @@ def print_for_service(service: TwoFactorAuthDetails) -> None:
 
 
 def generate_all_totp(services: TwoFactorDetailStorage) -> None:
+    """
+    Generate TOTP codes for all services.
+    """
     for service in services:
         print_for_service(service)
 
 
 def generate_one_otp(services: TwoFactorDetailStorage) -> None:
+    """
+    Query the user for a service, then generate a TOTP code for it.
+    """
     service_name: str
     while service_name := questionary.autocomplete(
         "Choose a service", choices=services.keys(), style=generate_custom_style()
@@ -55,10 +77,18 @@ def generate_one_otp(services: TwoFactorDetailStorage) -> None:
 
 @clear
 def show_service_info(services: TwoFactorDetailStorage, about: str) -> None:
+    """
+    `--info <service>` to show the raw JSON info for a service as stored in the .2fas file.
+    """
     rich.print(services[about])
 
 
 def show_service_info_interactive(services: TwoFactorDetailStorage) -> None:
+    """
+    Menu when choosing "Info about a Service".
+
+    The raw JSON info for a service as stored in the .2fas file will be printed out.
+    """
     about: str
     while about := questionary.select(
         "About which service?", choices=services.keys(), style=generate_custom_style()
@@ -70,6 +100,9 @@ def show_service_info_interactive(services: TwoFactorDetailStorage) -> None:
 
 @clear
 def command_interactive(filename: str = None) -> None:
+    """
+    Interactive menu when using 2fas without any action flags.
+    """
     if not filename:
         # get from settings or
         filename = default_2fas_file()
@@ -106,6 +139,9 @@ def command_interactive(filename: str = None) -> None:
 
 
 def add_2fas_file() -> str:
+    """
+    Query the user for a 2fas file and remember it for later.
+    """
     settings = state.settings
 
     filename: str = questionary.path(
@@ -116,7 +152,7 @@ def add_2fas_file() -> str:
     ).ask()
 
     if filename is None:
-        exit_with_clear(0)
+        return exit_with_clear(0)
 
     filename = expand_path(filename)
 
@@ -125,6 +161,9 @@ def add_2fas_file() -> str:
 
 
 def default_2fas_file() -> str:
+    """
+    Load the default 2fas file from settings or query the user for it.
+    """
     settings = state.settings
     if settings.default_file:
         return settings.default_file
@@ -139,11 +178,22 @@ def default_2fas_file() -> str:
 
 
 def default_2fas_services() -> TwoFactorDetailStorage:
+    """
+    Load the 2fas services from the active default file.
+    """
     filename = default_2fas_file()
     return prepare_to_generate(filename)
 
 
 def command_generate(filename: str | None, other_args: list[str]) -> None:
+    """
+    Handles the generation of OTP codes for the specified service(s) \
+        or initiates an interactive menu if no services are specified.
+
+    Args:
+        filename: path to the active .2fas file
+        other_args: list of services to generate codes for. If empty, an interactive menu will be shown.
+    """
     storage = prepare_to_generate(filename)
     found: list[TwoFactorAuthDetails] = []
 
@@ -159,15 +209,24 @@ def command_generate(filename: str | None, other_args: list[str]) -> None:
 
 
 def get_setting(key: str) -> None:
+    """
+    `--setting key` to get a specifi setting's value.
+    """
     value = get_cli_setting(key)
     rich.print(f"- {key}: {value}")
 
 
 def set_setting(key: str, value: str) -> None:
+    """
+    `--setting key value` to update a setting.
+    """
     set_cli_setting(key, value)
 
 
 def list_settings() -> None:
+    """
+    Use --settings to show all current settings.
+    """
     rich.print("Current settings:")
     for key, value in state.settings.__dict__.items():
         if key.startswith("_"):
@@ -178,6 +237,9 @@ def list_settings() -> None:
 
 @clear
 def set_default_file_interactive(filename: str) -> None:
+    """
+    Interactive menu (after Settings) to set the default 2fas file.
+    """
     new_filename = questionary.select(
         "Pick a file:",
         choices=state.settings.files or [],
@@ -197,6 +259,9 @@ def set_default_file_interactive(filename: str) -> None:
 
 @clear()
 def command_manage_files(filename: str = None) -> None:
+    """
+    Interactive menu (after Settings) to manage known files.
+    """
     to_remove = questionary.checkbox(
         "Which files do you want to remove?",
         choices=state.settings.files or [],
@@ -211,19 +276,11 @@ def command_manage_files(filename: str = None) -> None:
     return None
 
 
-def generate_choices(choices: dict[str, str], with_exit: bool = True) -> list[questionary.Choice]:
-    result = [
-        questionary.Choice(key, value, shortcut_key=str(idx)) for idx, (key, value) in enumerate(choices.items(), 1)
-    ]
-
-    if with_exit:
-        result.append(questionary.Choice("Exit", "exit", shortcut_key="0"))
-
-    return result
-
-
 @clear
 def toggle_autoverbose(filename: str) -> None:
+    """
+    Interactive menu to manage the 'auto verbose' setting.
+    """
     settings = state.settings
 
     is_enabled = "yes" if settings.auto_verbose else "no"
@@ -251,6 +308,9 @@ def toggle_autoverbose(filename: str) -> None:
 
 @clear
 def command_settings(filename: str) -> None:
+    """
+    Menu that shows up when you've chosen 'Settings' from the interactive menu.
+    """
     rich.print(f"Active file: [blue]{filename}[/blue]")
     action = questionary.select(
         "What do you want to do?",
@@ -287,6 +347,14 @@ def command_settings(filename: str) -> None:
 
 
 def command_setting(args: list[str]) -> None:
+    """
+    Triggered when using --setting, --settings, -s.
+
+    Multiple options:
+    --setting
+    --setting key
+    --setting key value, --setting key=value
+    """
     # required until PyCharm understands 'match' better:
     keyvalue: str
     key: str
@@ -310,6 +378,9 @@ def command_setting(args: list[str]) -> None:
 
 
 def command_update() -> None:
+    """
+    --self-update tries to update this library to the latest version on pypi.
+    """
     python = sys.executable
     pip = f"{python} -m pip"
     cmd = f"{pip} install --upgrade 2fas"
@@ -320,6 +391,9 @@ def command_update() -> None:
 
 
 def print_version() -> None:
+    """
+    --version prints the currently installed version of this library.
+    """
     rich.print(__version__)
 
 
@@ -357,22 +431,25 @@ def main(
     ),
 ) -> None:  # pragma: no cover
     """
-    Cli entrypoint.
+    You can use this command in multiple ways.
+
+    2fas
+
+    2fas path/to/file.fas <service>
+
+    2fas <service> path/to/file.fas
+
+    2fas <subcommand>
+
+    2fas --setting key value
+
+    2fas --setting key=value
     """
-    # 2fas
-
-    # 2fas path/to/file.fas <service>
-    # 2fas <service> path/to/file.fas
-    # 2fas <subcommand>
-
-    # 2fas --setting key value
-    # 2fas --setting key=value
-
     # stateless actions:
     if version:
         return print_version()
     elif self_update:
-        command_update()
+        return command_update()
 
     # stateful:
 

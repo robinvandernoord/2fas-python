@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "2fas"
 dynamic = ["version"]
-description = 'Unofficial implementation of 2fas for Python'
+description = 'Unofficial implementation of 2fas for Python (as a CLI tool)'
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
@@ -23,13 +23,10 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    "cryptography",
+    "lib2fas",
     "configuraptor>=1.25",
-    "PyOTP",
-    "keyring",
     "typer[all]",
     "questionary",
-    "rapidfuzz",
 ]
 
 [template.plugins.default]
@@ -184,4 +181,9 @@ add_ignore = [
 [tool.pytest.ini_options]
 pythonpath = [
     "src",
+]
+
+[tool.coverage.run]
+omit = [
+    "src/twofas/cli.py",
 ]

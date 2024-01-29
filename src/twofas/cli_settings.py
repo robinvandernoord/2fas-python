@@ -1,3 +1,7 @@
+"""
+This file deals with managing settings for 2fas.
+"""
+
 import typing
 from pathlib import Path
 from typing import Any
@@ -15,20 +19,33 @@ CONFIG_KEY = "tool.2fas"
 
 
 def expand_path(file: str | Path) -> str:
+    """
+    Expand ~/... into /home/<user>/...
+    """
     return str(Path(file).expanduser())
 
 
 def expand_paths(paths: typing.Iterable[str]) -> list[str]:
+    """
+    Expand multiple paths.
+    """
     return [expand_path(f) for f in paths]
 
 
 @beautify
 class CliSettings(TypedConfig, singleton.Singleton):
+    """
+    Class for the ~/.config/2fas.toml settings file.
+    """
+
     files: list[str] | None
     default_file: str | None
     auto_verbose: bool = False
 
     def add_file(self, filename: str | None, _config_file: str | Path = DEFAULT_SETTINGS) -> None:
+        """
+        Add a new 2fas file to the configs history list.
+        """
         if not filename:
             return
 
@@ -43,6 +60,9 @@ class CliSettings(TypedConfig, singleton.Singleton):
         self.files = expand_paths(files)
 
     def remove_file(self, filenames: str | typing.Iterable[str], _config_file: str | Path = DEFAULT_SETTINGS) -> None:
+        """
+        Remove a known 2fas file from the config's history list.
+        """
         if isinstance(filenames, str | Path):
             filenames = [filenames]
 
@@ -51,29 +71,34 @@ class CliSettings(TypedConfig, singleton.Singleton):
         files = [expand_path(_) for _ in (self.files or []) if _ not in filenames]
 
         if self.default_file in filenames:
-            print("yuhu", files, self.default_file)
             new_default = files[0] if files else None
             set_cli_setting("default-file", new_default, _config_file)
             self.default_file = new_default
-            print("yuhup", new_default, self.default_file)
 
         set_cli_setting("files", files, _config_file)
         self.files = files
 
-        print(f"{self=}")
-
 
 def load_cli_settings(input_file: str | Path = DEFAULT_SETTINGS, **overwrite: Any) -> CliSettings:
+    """
+    Load the config file into a CliSettings instance.
+    """
     return CliSettings.load([input_file, overwrite], key=CONFIG_KEY)
 
 
 def get_cli_setting(key: str, filename: str | Path = DEFAULT_SETTINGS) -> typing.Any:
+    """
+    Get a setting from the config file.
+    """
     key = convert_key(key)
     settings = load_cli_settings(filename)
     return getattr(settings, key)
 
 
 def set_cli_setting(key: str, value: typing.Any, filename: str | Path = DEFAULT_SETTINGS) -> None:
+    """
+    Update a setting in the config file.
+    """
     filepath = Path(filename)
     key = convert_key(key)
 
