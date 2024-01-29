@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v1.0.0 (2024-01-29)
+
+### Fix
+
+* Extracted core funcionality to lib2fas ([`88ca459`](https://github.com/robinvandernoord/2fas-python/commit/88ca459c2b2f2f227b72d2d5722e051cc140f35b))
+
 ## v0.1.0 (2024-01-25)
 
 ### Feature
