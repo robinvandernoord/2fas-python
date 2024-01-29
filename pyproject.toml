@@ -41,9 +41,15 @@ dev = [
     "python-semantic-release<8",
     "su6[all]",
     "pytest-mypy-testing",
+    "types-requests",
     "edwh",
 ]
 
+
+gui = [
+    "eel",
+    "result",
+]
 
 [project.scripts]
 2fas = "twofas.cli:app"

@@ -27,6 +27,7 @@ from .cli_support import (
     generate_custom_style,
     state,
 )
+from .gui import start_gui
 
 app = typer.Typer()
 
@@ -424,6 +425,7 @@ def main(
     remove: bool = typer.Option(
         False, "--remove", "--rm", "-r", help="`--remove <filename>` to remove a .2fas file from the known files"
     ),
+    gui: bool = typer.Option(False, "--gui", "-g", help="Start 2fas GUI"),
     # flags:
     verbose: bool = typer.Option(
         False,
@@ -453,6 +455,8 @@ def main(
         return print_version()
     elif self_update:
         return command_update()
+    elif gui:
+        return start_gui()
 
     # stateful:
 

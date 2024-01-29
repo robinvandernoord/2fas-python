@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>2fas</title>
+</head>
+<body>
+
+<div id="imageholder" style="background: aqua">
+
+</div>
+
+<script type="text/javascript" src="/eel.js"></script>
+
+<script>
+    /* Eel abstraction */
+    let handler = {
+        get(target, name) {
+            return async (...args) => {
+                return eel[name](...args)()
+            }
+        }
+    }
+
+    const Python = new Proxy({
+        // functions (here for typing only):
+        "load_image": uuid => `base64 string for ${uuid}`,
+        "hello": () => null, // noop
+    }, handler);
+
+
+    // start normal code:
+
+
+    const $imageholder = document.getElementById("imageholder");
+
+    function new_image(b64) {
+        const $image = new Image();
+        $image.src = b64;
+        $imageholder.appendChild($image)
+    }
+
+    function hello() {
+        console.debug("Python says hello!")
+        Python.hello();
+    }
+
+    eel.expose(hello)
+
+    function python_task_started(task) {
+        console.debug(`${task} started in Python.`)
+    }
+
+    eel.expose(python_task_started)
+
+    async function python_task_completed(task) {
+        console.debug(`${task} completed in Python.`)
+
+        if (task === "load_icons") {
+            // github icon
+            Python.load_image("fff32440-f5be-4b9c-b471-f37d421f10c3").then(new_image)
+            // wordpress icon
+            Python.load_image("708df726-fb8b-4c01-8990-f2da0cd33839").then(new_image)
+        }
+    }
+
+    eel.expose(python_task_completed, 'python_task_completed')
+</script>
+</body>
+</html>
