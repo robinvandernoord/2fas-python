@@ -11,6 +11,7 @@ from zipfile import ZipFile
 import requests
 from configuraptor import asdict
 from lib2fas import load_services
+from pyotp import TOTP
 from threadful import ThreadWithReturn, thread
 
 # todo: extract to separate gui lib
@@ -264,8 +265,13 @@ class GUI:
         print("JS says hello!", file=sys.stderr)
 
     def get_services(self):
+        # todo: don't hard code
+        # store in self
         services = load_services("/home/robin/Nextcloud/2fa/2fas-backup-20240117132052.2fas")
         return [s.as_dict() for s in services]
+
+    def totp(self, secret: str) -> str:
+        return TOTP(secret).now()
 
     def load_image(self, uuid: str) -> str:
         self._log("start load image", uuid)

@@ -1,38 +1,3 @@
-// totp.ts
-class TOTP {
-  static async generateOTP(secret, {
-    period = 30,
-    digits = 6,
-    format = false
-  } = {}) {
-    const epoch = Math.floor(Date.now() / 1000);
-    const counter = Math.floor(epoch / period);
-    const counterBytes = this.intToBytes(counter);
-    const secretBytes = this.stringToBytes(secret);
-    try {
-      const key = await window.crypto.subtle.importKey("raw", secretBytes, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
-      const hmacBytes = await window.crypto.subtle.sign("HMAC", key, new Uint8Array(counterBytes));
-      const offset = hmacBytes.byteLength - 1;
-      const truncated = new DataView(hmacBytes).getUint32(offset - 3) & 2147483647;
-      const pinValue = (truncated % Math.pow(10, digits)).toString().padStart(digits, "0");
-      const formatted = pinValue.match(/.{1,3}/g)?.join(" ");
-      return format && formatted ? formatted : pinValue;
-    } catch (error) {
-      console.error("Error generating OTP:", error);
-      return "";
-    }
-  }
-  static intToBytes(num) {
-    const arr = new ArrayBuffer(8);
-    const view = new DataView(arr);
-    view.setBigUint64(0, BigInt(num), false);
-    return new Uint8Array(arr);
-  }
-  static stringToBytes(str) {
-    return new TextEncoder().encode(str);
-  }
-}
-
 // app.ts
 var setIntervalImmediately = function(func, interval) {
   func();
@@ -51,16 +16,36 @@ var render_template = function(template_id, variables) {
   tmp_container.innerHTML = content;
   return tmp_container.firstElementChild ?? tmp_container;
 };
+var copy_current_code = function($code_holder) {
+  const current_code = $code_holder.dataset.code;
+  if (current_code) {
+    navigator.clipboard.writeText(current_code);
+  } else {
+    console.error("No current code?");
+  }
+};
 var new_totp_entry = function(data, secret) {
   const entry = render_template("totp-entry", data);
   $totp_holder.appendChild(entry);
+  Object.assign(entry.dataset, {
+    service: data.service.toLowerCase(),
+    username: data.username?.toLowerCase() ?? ""
+  });
   const $code_holder = entry.querySelector(".entry-code");
-  if (!$code_holder) {
-    return;
-  }
+  let t = 0;
+  $code_holder.addEventListener("click", async (_) => {
+    clearTimeout(t);
+    $code_holder.classList.add("active");
+    t = setTimeout(() => {
+      $code_holder.classList.remove("active");
+    }, 1000);
+    copy_current_code($code_holder);
+  });
   setIntervalImmediately(async () => {
-    const code = await TOTP.generateOTP(secret, { format: true });
-    $code_holder.innerHTML = code;
+    const code = await Python.totp(secret);
+    const formatted = code.match(/.{1,3}/g)?.join(" ") ?? code;
+    $code_holder.dataset.code = code;
+    $code_holder.innerHTML = formatted;
   }, 1000);
 };
 var hello = function() {
@@ -84,21 +69,54 @@ var update_countdown = function() {
     $counter.innerHTML = value;
   });
 };
-async function main() {
-  setIntervalImmediately(update_countdown, 1000);
+async function init_services() {
   const services = await Python.get_services();
-  services.forEach(async (service) => {
+  const promises = services.map(async (service) => {
     const image = await Python.load_image(service.icon.iconCollection.id);
     new_totp_entry({
       service: service.name,
-      username: "",
-      code: "",
+      username: service.otp.account ?? service.otp.label ?? "",
       image
     }, service.secret);
+    return true;
   });
+  Promise.all(promises).then(apply_alternating_background_colors);
+}
+var apply_alternating_background_colors = function() {
+  const entries = document.querySelectorAll(".totp-entry:not(.hidden)");
+  console.log("apply_alternating_background_colors", entries);
+  entries.forEach(function(entry, index) {
+    if (index % 2 === 0) {
+      entry.style.backgroundColor = "var(--light-bg)";
+    } else {
+      entry.style.backgroundColor = "var(--dark-bg)";
+    }
+  });
+};
+var search = function(event) {
+  const query = $search.value.toLowerCase();
+  const entries = document.querySelectorAll(".totp-entry");
+  entries.forEach((entry) => {
+    let matches = !query || entry.dataset.service?.includes(query) || entry.dataset.username?.includes(query);
+    entry.classList.toggle("hidden", !matches);
+  });
+  apply_alternating_background_colors();
+};
+async function setup_search() {
+  $search.addEventListener("change", search);
+  $search.addEventListener("keyup", search);
+  document.addEventListener("keydown", (_) => {
+    $search.focus();
+  });
+}
+async function main() {
+  setIntervalImmediately(update_countdown, 1000);
+  await init_services();
+  await setup_search();
 }
 var $totp_holder = document.getElementById("totp-holder");
 eel.expose(hello);
 eel.expose(python_task_started);
 eel.expose(python_task_completed, "python_task_completed");
+var $search = document.getElementById("search");
 main();

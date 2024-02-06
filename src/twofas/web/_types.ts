@@ -1,7 +1,7 @@
 export type TotpEntry = {
   service: string;
   username: string | null;
-  code: string;
+  // code: string;
   image?: string | null;
 };
 
@@ -43,6 +43,7 @@ export interface TPython {
   load_image: (_: string) => Promise<string>;
   hello: () => null; // noop
   get_services: () => Promise<TwoFactorAuthDetails[]>;
+  totp: (secret: string) => Promise<string>;
 }
 
 export type AnyFunc = (..._: any[]) => any;

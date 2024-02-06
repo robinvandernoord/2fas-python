@@ -1,4 +1,3 @@
-import TOTP from "./totp";
 import { TPython, Eel, TotpEntry } from "./_types";
 
 declare var Python: TPython;
@@ -14,7 +13,7 @@ function setIntervalImmediately(func: () => any, interval: number): number {
   return setInterval(func, interval);
 }
 
-function render_template(template_id: string, variables: AnyDict) {
+function render_template(template_id: string, variables: AnyDict): HTMLElement {
   const template = document.getElementById(template_id);
   if (!template) {
     throw `Template ${template} not found.`;
@@ -33,23 +32,50 @@ function render_template(template_id: string, variables: AnyDict) {
   tmp_container.innerHTML = content;
 
   // Get the template content after interpolation
-  return tmp_container.firstElementChild ?? tmp_container; // contents OR empty div
+  return (tmp_container.firstElementChild ?? tmp_container) as HTMLElement;
+  // contents OR empty div
 }
 
 const $totp_holder = document.getElementById("totp-holder") as HTMLDivElement;
+
+function copy_current_code($code_holder: HTMLDivElement) {
+  const current_code = $code_holder.dataset.code;
+  if (current_code) {
+    navigator.clipboard.writeText(current_code);
+  } else {
+    console.error("No current code?");
+  }
+}
 
 function new_totp_entry(data: TotpEntry, secret: string) {
   const entry = render_template("totp-entry", data);
   $totp_holder.appendChild(entry);
 
-  const $code_holder = entry.querySelector(".entry-code");
-  if (!$code_holder) {
-    // will probably not happen
-    return;
-  }
+  // store all data:
+  Object.assign(entry.dataset, {
+    service: data.service.toLowerCase(),
+    username: data.username?.toLowerCase() ?? "",
+  });
+
+  const $code_holder = entry.querySelector(".entry-code") as HTMLDivElement;
+
+  let t = 0; // timeout
+  $code_holder.addEventListener("click", async (_) => {
+    clearTimeout(t);
+    // keep active for some longer:
+    $code_holder.classList.add("active");
+    t = setTimeout(() => {
+      $code_holder.classList.remove("active");
+    }, 1000);
+
+    copy_current_code($code_holder);
+  });
+
   setIntervalImmediately(async () => {
-    const code = await TOTP.generateOTP(secret, { format: true });
-    $code_holder.innerHTML = code;
+    const code = await Python.totp(secret);
+    const formatted = code.match(/.{1,3}/g)?.join(" ") ?? code;
+    $code_holder.dataset.code = code;
+    $code_holder.innerHTML = formatted;
   }, 1_000);
 }
 
@@ -88,25 +114,83 @@ function update_countdown() {
   });
 }
 
-async function main() {
-  // todo: check password/auth
-  setIntervalImmediately(update_countdown, 1000);
-
+async function init_services() {
   const services = await Python.get_services(/* password */);
 
-  services.forEach(async (service) => {
+  const promises = services.map(async (service) => {
     const image = await Python.load_image(service.icon.iconCollection.id);
 
     new_totp_entry(
       {
         service: service.name,
-        username: "",
-        code: "", // to be filled in a loop
+        username: service.otp.account ?? service.otp.label ?? "",
         image,
       },
       service.secret,
     );
+
+    return true;
   });
+
+  // when services exist in dom, update backgrounds:
+  Promise.all(promises).then(apply_alternating_background_colors);
+}
+
+function apply_alternating_background_colors() {
+  const entries = document.querySelectorAll(
+    ".totp-entry:not(.hidden)",
+  ) as NodeListOf<HTMLElement>;
+
+  console.log("apply_alternating_background_colors", entries);
+
+  entries.forEach(function (entry, index) {
+    if (index % 2 === 0) {
+      entry.style.backgroundColor = "var(--light-bg)";
+    } else {
+      entry.style.backgroundColor = "var(--dark-bg)";
+    }
+  });
+}
+
+const $search = document.getElementById("search") as HTMLInputElement;
+
+function search(event: Event) {
+  const query = $search.value.toLowerCase();
+
+  const entries = document.querySelectorAll(
+    ".totp-entry",
+  ) as NodeListOf<HTMLElement>;
+
+  entries.forEach((entry: HTMLElement) => {
+    let matches =
+      !query ||
+      entry.dataset.service?.includes(query) ||
+      entry.dataset.username?.includes(query);
+
+    entry.classList.toggle("hidden", !matches);
+  });
+
+  // after toggling .hidden, update backgrounds:
+  apply_alternating_background_colors();
+}
+
+async function setup_search() {
+  $search.addEventListener("change", search);
+  $search.addEventListener("keyup", search);
+
+  // auto focus on typing anywhere in the window:
+  document.addEventListener("keydown", (_) => {
+    $search.focus();
+  });
+}
+
+async function main() {
+  // todo: check password/auth
+  setIntervalImmediately(update_countdown, 1000);
+
+  await init_services();
+
+  await setup_search();
 }
 
 main();

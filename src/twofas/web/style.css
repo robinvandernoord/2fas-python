@@ -16,6 +16,10 @@ body {
   overflow-x: hidden; /* Hide horizontal scrollbar */
 }
 
+.totp-holder {
+  overflow-x: hidden;
+}
+
 .header {
   position: fixed;
   top: 0;
@@ -60,12 +64,13 @@ body {
   margin-top: 80px; /* header height (70) + margin (10) */
   width: calc(100% - 20px); /* Adjusted width to accommodate for padding */
   overflow-y: auto;
-  padding-right: 20px; /* Added padding to prevent horizontal scrollbar */
+  overflow-x: hidden;
+  /* padding-right: 20px; /* Added padding to prevent horizontal scrollbar */
 }
 
 .totp-entry {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   align-items: center;
   justify-content: space-between;
   padding: 10px;
@@ -96,6 +101,10 @@ body {
   margin-right: 20px; /* Add margin to avoid touching edges */
 }
 
+.hidden {
+  display: none;
+}
+
 .entry-name {
   font-size: 18px;
   font-weight: bold;
@@ -105,11 +114,23 @@ body {
 .entry-username {
   font-size: 14px;
   margin-bottom: 3px;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .entry-code {
   font-size: 24px;
+  padding: 10px;
+  cursor: pointer;
   color: var(--primary-color); /* Blue color for TOTP code */
+  white-space: nowrap;
+}
+
+.entry-code:hover,
+.entry-code:active,
+.entry-code.active {
+  border-radius: 6px;
 }
 
 .entry-code:hover {
@@ -117,23 +138,25 @@ body {
   background: var(--primary-color);
 }
 
-.entry-code:active {
-  color: var(--white);
-  background: var(--primary-dark);
+.entry-code:active,
+.entry-code.active {
+  color: var(--primary-color);
+  background-color: var(--white);
 }
 
-/* Alternating background colors for each entry */
+/* Alternating background colors for each entry - DONE BY JS NOW!
 .totp-entry:nth-child(even) {
   background-color: var(
     --light-bg
-  ); /* Darker background color for even entries */
-}
+  );
 
 .totp-entry:nth-child(odd) {
   background-color: var(
     --dark-bg
-  ); /* Darker background color for odd entries */
+  );
 }
+
+*/
 
 /* Custom scrollbar for Chrome, Edge, and Safari */
 /* Custom scrollbar */
