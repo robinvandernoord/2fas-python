@@ -28,6 +28,7 @@ var new_totp_entry = function(data, secret) {
   const entry = render_template("totp-entry", data);
   $totp_holder.appendChild(entry);
   Object.assign(entry.dataset, {
+    icon_id: data.icon_id,
     service: data.service.toLowerCase(),
     username: data.username?.toLowerCase() ?? ""
   });
@@ -48,6 +49,22 @@ var new_totp_entry = function(data, secret) {
     $code_holder.innerHTML = formatted;
   }, 1000);
 };
+var fix_missing_icons = function() {
+  const missing_imgs = document.querySelectorAll('.totp-entry img[src=""]');
+  if (missing_imgs.length) {
+    console.debug(`Try to fix ${missing_imgs.length} images.`);
+  } else {
+    console.debug(`No missing images!`);
+  }
+  missing_imgs.forEach(async ($img) => {
+    const icon_id = $img.dataset.icon;
+    if (!icon_id) {
+      return;
+    }
+    const img = await Python.load_image(icon_id);
+    $img.src = img;
+  });
+};
 var hello = function() {
   console.debug("Python says hello!");
   Python.hello();
@@ -58,6 +75,7 @@ var python_task_started = function(task) {
 async function python_task_completed(task) {
   console.debug(`${task} completed in Python.`);
   if (task === "load_icons") {
+    fix_missing_icons();
   }
 }
 var current_countdown_value = function() {
@@ -74,6 +92,7 @@ async function init_services() {
   const promises = services.map(async (service) => {
     const image = await Python.load_image(service.icon.iconCollection.id);
     new_totp_entry({
+      icon_id: service.icon.iconCollection.id,
       service: service.name,
       username: service.otp.account ?? service.otp.label ?? "",
       image
@@ -84,7 +103,6 @@ async function init_services() {
 }
 var apply_alternating_background_colors = function() {
   const entries = document.querySelectorAll(".totp-entry:not(.hidden)");
-  console.log("apply_alternating_background_colors", entries);
   entries.forEach(function(entry, index) {
     if (index % 2 === 0) {
       entry.style.backgroundColor = "var(--light-bg)";

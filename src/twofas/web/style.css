@@ -62,7 +62,7 @@ body {
 
 .totp-list {
   margin-top: 80px; /* header height (70) + margin (10) */
-  width: calc(100% - 20px); /* Adjusted width to accommodate for padding */
+  width: calc(100% - 10px); /* Adjusted width to accommodate for padding */
   overflow-y: auto;
   overflow-x: hidden;
   /* padding-right: 20px; /* Added padding to prevent horizontal scrollbar */

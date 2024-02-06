@@ -53,9 +53,12 @@ function new_totp_entry(data: TotpEntry, secret: string) {
 
   // store all data:
   Object.assign(entry.dataset, {
+    icon_id: data.icon_id,
     service: data.service.toLowerCase(),
     username: data.username?.toLowerCase() ?? "",
   });
+
+  // todo: on click on service show more info, previous + next TOTP code
 
   const $code_holder = entry.querySelector(".entry-code") as HTMLDivElement;
 
@@ -79,6 +82,27 @@ function new_totp_entry(data: TotpEntry, secret: string) {
   }, 1_000);
 }
 
+function fix_missing_icons() {
+  const missing_imgs = document.querySelectorAll(
+    '.totp-entry img[src=""]',
+  ) as NodeListOf<HTMLImageElement>;
+
+  if (missing_imgs.length) {
+    console.debug(`Try to fix ${missing_imgs.length} images.`);
+  } else {
+    console.debug(`No missing images!`);
+  }
+
+  missing_imgs.forEach(async ($img) => {
+    const icon_id = $img.dataset.icon;
+    if (!icon_id) {
+      return;
+    }
+    const img = await Python.load_image(icon_id);
+    $img.src = img;
+  });
+}
+
 function hello() {
   console.debug("Python says hello!");
   Python.hello();
@@ -97,6 +121,7 @@ async function python_task_completed(task: string) {
 
   if (task === "load_icons") {
     // todo: check if any icons were missing
+    fix_missing_icons();
   }
 }
 
@@ -122,6 +147,7 @@ async function init_services() {
 
     new_totp_entry(
       {
+        icon_id: service.icon.iconCollection.id,
         service: service.name,
         username: service.otp.account ?? service.otp.label ?? "",
         image,
@@ -140,8 +166,6 @@ function apply_alternating_background_colors() {
   const entries = document.querySelectorAll(
     ".totp-entry:not(.hidden)",
   ) as NodeListOf<HTMLElement>;
-
-  console.log("apply_alternating_background_colors", entries);
 
   entries.forEach(function (entry, index) {
     if (index % 2 === 0) {

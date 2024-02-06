@@ -31,7 +31,9 @@
 
     <template id="totp-entry">
       <div class="totp-entry">
-        <div class="icon"><img src="${image}" alt="" /></div>
+        <div class="icon">
+          <img data-icon="${icon_id}" src="${image}" alt="" />
+        </div>
         <div class="entry-details">
           <div class="entry-name">${service}</div>
           <div class="entry-username">${username}</div>

@@ -3,6 +3,7 @@ export type TotpEntry = {
   username: string | null;
   // code: string;
   image?: string | null;
+  icon_id: string;
 };
 
 export interface OtpDetails {
