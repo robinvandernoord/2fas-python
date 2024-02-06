@@ -9,8 +9,8 @@ from typing import Any, Optional
 from zipfile import ZipFile
 
 import requests
-from configuraptor import asdict
 from lib2fas import load_services
+from lib2fas._types import AnyDict
 from pyotp import TOTP
 from threadful import ThreadWithReturn, thread
 
@@ -264,7 +264,7 @@ class GUI:
     def hello(self) -> None:
         print("JS says hello!", file=sys.stderr)
 
-    def get_services(self):
+    def get_services(self) -> list[AnyDict]:
         # todo: don't hard code
         # store in self
         services = load_services("/home/robin/Nextcloud/2fa/2fas-backup-20240117132052.2fas")
