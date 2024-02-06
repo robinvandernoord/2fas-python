@@ -1,0 +1,10 @@
+{
+  "compilerOptions": {
+    "target": "es2015",
+    "lib": ["ES2015", "dom"],
+    "module": "esnext",
+    "allowJs": false,
+    "strict": true
+  },
+  "exclude": ["*.js"]
+}

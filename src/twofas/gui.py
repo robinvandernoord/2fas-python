@@ -9,6 +9,8 @@ from typing import Any, Optional
 from zipfile import ZipFile
 
 import requests
+from configuraptor import asdict
+from lib2fas import load_services
 from threadful import ThreadWithReturn, thread
 
 # todo: extract to separate gui lib
@@ -16,9 +18,6 @@ from threadful import ThreadWithReturn, thread
 
 def has_eel() -> tuple[Optional[types.ModuleType], Optional[ImportError]]:
     try:
-        # import gevent.monkey
-        # gevent.monkey.patch_all()
-
         import eel
 
         return eel, None
@@ -50,10 +49,46 @@ def center_position(screen_size: tuple[int, int], window_size: tuple[int, int]) 
     return (x, y)
 
 
-def calc_window_size() -> dict[str, tuple[int, int]]:
+number = typing.TypeVar("number", int, float)
+
+
+def minmax(value: number, minimum: Optional[number] = 0, maximum: Optional[number] = None) -> number:
+    """
+    Returns the value constrained between a minimum and maximum value.
+
+    Parameters:
+    - value: The value to be constrained.
+    - minimum: The minimum allowed value (defaults to 0).
+    - maximum: The maximum allowed value (defaults to None, which means value itself).
+
+    Returns:
+    - The value constrained between minimum and maximum.
+    """
+    if minimum is None:
+        # Set minimum to 0 if it's None
+        minimum = 0
+
+    # Set maximum to value if it's None
+    maximum = maximum if maximum is not None else value
+
+    # Ensure that value is within the specified range
+    if value < minimum:
+        return minimum
+    elif value > maximum:
+        return maximum
+    else:
+        return value
+
+
+def calc_window_size(
+    min_width: int = 0,
+    min_height: int = 0,
+    max_width: int = 1920,
+    max_height: int = 1080,
+) -> dict[str, tuple[int, int]]:
     screen_width, screen_height = get_screen_width()
 
-    window_size = screen_width // 8, screen_height // 3
+    window_size = (minmax(screen_width // 8, min_width, max_width), minmax(screen_height // 3, min_height, max_height))
 
     return {"size": window_size, "position": center_position((screen_width, screen_height), window_size)}
 
@@ -168,7 +203,12 @@ class GUI:
 
         eel.init(str(WEB_DIR))
         self._log("eel.init", WEB_DIR)
-        eel.start("main.html", port=0, block=False, **calc_window_size())
+        sizes = calc_window_size(
+            min_height=700,
+            min_width=400,
+        )
+
+        eel.start("main.html", port=0, block=False, **sizes)
 
         self.js = typing.cast(EelWithJavascript, eel)
         self._auto_expose()
@@ -222,6 +262,10 @@ class GUI:
     # public JS methods:
     def hello(self) -> None:
         print("JS says hello!", file=sys.stderr)
+
+    def get_services(self):
+        services = load_services("/home/robin/Nextcloud/2fa/2fas-backup-20240117132052.2fas")
+        return [s.as_dict() for s in services]
 
     def load_image(self, uuid: str) -> str:
         self._log("start load image", uuid)

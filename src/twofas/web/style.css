@@ -1,0 +1,126 @@
+:root {
+  /* --primary-color: #007bff; */
+  --primary-color: #00c896;
+  --darker-bg: #1e1e1e;
+  --dark-bg: #2b2b2b;
+  --light-bg: #383838;
+  --white: #fff;
+}
+
+body {
+  font-family: Arial, sans-serif;
+  background-color: var(--darker-bg); /* Dark background color */
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden; /* Hide horizontal scrollbar */
+}
+
+.search-container {
+  display: flex;
+  align-items: center; /* Center items vertically */
+  justify-content: center; /* Center items horizontally */
+  width: 100%;
+  padding-top: 10px;
+  padding-bottom: 10px;
+  box-sizing: border-box;
+}
+
+.search-bar {
+  width: 90%;
+  padding: 8px 10px;
+  border-radius: 5px;
+  border: none;
+  background-color: var(--dark-bg); /* Darker background color */
+  color: #fff; /* Text color */
+}
+
+.totp-list {
+  margin-top: 10px;
+  width: calc(100% - 20px); /* Adjusted width to accommodate for padding */
+  overflow-y: auto;
+  padding-right: 20px; /* Added padding to prevent horizontal scrollbar */
+}
+
+.totp-entry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px;
+  margin-bottom: 10px;
+  border-radius: 5px;
+  background-color: var(--dark-bg); /* Darker background color */
+  margin-left: 10px; /* Added margin-right to prevent touching the right */
+  margin-right: 10px; /* Added margin-right to prevent touching the right */
+  width: calc(100% - 20px); /* Adjusted width to accommodate for padding */
+}
+
+.icon {
+  margin-right: 10px;
+}
+
+.entry-details {
+  flex-grow: 1;
+  color: var(--white); /* Text color */
+  overflow: hidden; /* Ensures text doesn't overflow */
+  margin-right: 20px; /* Add margin to avoid touching edges */
+}
+
+.entry-name {
+  font-size: 18px;
+  font-weight: bold;
+  margin-bottom: 5px;
+}
+
+.entry-username {
+  font-size: 14px;
+  margin-bottom: 3px;
+}
+
+.entry-code {
+  font-size: 24px;
+  color: var(--primary-color); /* Blue color for TOTP code */
+}
+
+.counter-circle {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background-color: var(--primary-color); /* Blue color for counter circle */
+  color: var(--white);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 16px;
+  flex-shrink: 0; /* Prevents circle from shrinking too much */
+}
+
+/* Alternating background colors for each entry */
+.totp-entry:nth-child(even) {
+  background-color: var(
+    --light-bg
+  ); /* Darker background color for even entries */
+}
+
+.totp-entry:nth-child(odd) {
+  background-color: var(
+    --dark-bg
+  ); /* Darker background color for odd entries */
+}
+
+/* Custom scrollbar for Chrome, Edge, and Safari */
+/* Custom scrollbar */
+body::-webkit-scrollbar {
+  width: 8px;
+}
+
+body::-webkit-scrollbar-thumb {
+  background-color: var(--primary-color); /* Blue color for scrollbar thumb */
+  border-radius: 4px;
+}
+
+body::-webkit-scrollbar-track {
+  background-color: var(
+    --dark-bg
+  ); /* Darker background color for scrollbar track */
+}

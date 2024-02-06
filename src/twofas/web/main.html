@@ -1,111 +1,41 @@
 <!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport"
-          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
-    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0"
+    />
+    <meta http-equiv="X-UA-Compatible" content="ie=edge" />
     <title>2fas</title>
 
-<style>
-    html, body {
-        margin: 0;
-        padding: 0;
-    }
+    <link href="style.css" rel="stylesheet" />
+  </head>
 
-    #imageholder {
-        display: flex;
-        flex-direction: column;
-        align-items:center;
-        background: aqua;
-    }
-</style>
+  <body>
+    <main>
+      <div class="search-container">
+        <input type="text" placeholder="Filter..." class="search-bar" />
+      </div>
 
-</head>
-<body>
+      <div id="totp-holder" class="totp-list"></div>
+    </main>
 
-<div id="imageholder"></div>
+    <template id="totp-entry">
+      <div class="totp-entry">
+        <div class="icon"><img src="${icon}" alt="${service}" /></div>
+        <div class="entry-details">
+          <div class="entry-name">${service}</div>
+          <div class="entry-username">${username}</div>
+          <div class="entry-code">${code}</div>
+        </div>
+        <div class="counter-circle">${countdown}</div>
+      </div>
+    </template>
 
-<script type="text/javascript" src="/eel.js"></script>
+    <script type="text/javascript" src="/eel.js"></script>
+    <script type="text/javascript" src="eel-abstract.js"></script>
 
-<script>
-    /* Eel abstraction */
-    let handler = {
-        get(target, name) {
-            return async (...args) => {
-                return eel[name](...args)()
-            }
-        }
-    }
-
-    const Python = new Proxy({
-        // functions (here for typing only):
-        "load_image": uuid => `base64 string for ${uuid}`,
-        "hello": () => null, // noop
-    }, handler);
-
-
-    // start normal code:
-
-
-    const $imageholder = document.getElementById("imageholder");
-
-    /**
-     * @param {string} b64
-     */
-    function new_image(b64) {
-        const $image = new Image();
-        $image.src = b64;
-        return $image
-    }
-
-    /**
-     * @param {HTMLImageElement} $image
-     */
-    function new_row($image){
-        const $row = document.createElement("div")
-        $row.appendChild($image)
-        return $row
-    }
-
-    /**
-     * @param {HTMLDivElement} $row 
-     */
-    function to_holder($row) {
-        return $imageholder.appendChild($row)
-    }
-
-    function hello() {
-        console.debug("Python says hello!")
-        Python.hello();
-    }
-
-    eel.expose(hello)
-
-    /**
-     * @param {string} task
-     */
-    function python_task_started(task) {
-        console.debug(`${task} started in Python.`)
-    }
-
-    eel.expose(python_task_started)
-
-    /**
-     * @param {string} task
-     */
-    async function python_task_completed(task) {
-        console.debug(`${task} completed in Python.`)
-
-        if (task === "load_icons") {
-            // github icon
-            Python.load_image("fff32440-f5be-4b9c-b471-f37d421f10c3").then(new_image).then(new_row).then(to_holder)
-            // wordpress icon
-            Python.load_image("708df726-fb8b-4c01-8990-f2da0cd33839").then(new_image).then(new_row).then(to_holder)
-        }
-    }
-
-    eel.expose(python_task_completed, 'python_task_completed')
-</script>
-</body>
+    <script type="text/javascript" src="app.js"></script>
+  </body>
 </html>
