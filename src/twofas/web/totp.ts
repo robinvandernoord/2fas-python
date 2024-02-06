@@ -1,40 +1,51 @@
 // thanks ChatGPT
 
 export default class TOTP {
-  static generateOTP(
+  static async generateOTP(
     secret: string,
-    options?: { period?: number; digits?: number; format?: boolean },
+    {
+      period = 30,
+      digits = 6,
+      format = false,
+    }: {
+      period?: number;
+      digits?: number;
+      format?: boolean;
+    } = {},
   ): Promise<string> {
-    const { period = 30, digits = 6, format = false } = options || {};
-
     const epoch = Math.floor(Date.now() / 1000);
     const counter = Math.floor(epoch / period);
     const counterBytes = this.intToBytes(counter);
     const secretBytes = this.stringToBytes(secret);
 
-    const hmac = window.crypto.subtle
-      .importKey("raw", secretBytes, { name: "HMAC", hash: "SHA-1" }, false, [
-        "sign",
-      ])
-      .then((key) =>
-        window.crypto.subtle.sign("HMAC", key, new Uint8Array(counterBytes)),
+    try {
+      const key = await window.crypto.subtle.importKey(
+        "raw",
+        secretBytes,
+        { name: "HMAC", hash: "SHA-1" },
+        false,
+        ["sign"],
       );
 
-    return hmac
-      .then((hmacBytes) => {
-        const offset = hmacBytes.byteLength - 1;
-        const truncated =
-          new DataView(hmacBytes).getUint32(offset - 3) & 0x7fffffff;
-        const pinValue = (truncated % Math.pow(10, digits))
-          .toString()
-          .padStart(digits, "0");
-        const formatted = pinValue.match(/.{1,3}/g)?.join(" ");
-        return format && formatted ? formatted : pinValue;
-      })
-      .catch((error) => {
-        console.error("Error generating OTP:", error);
-        return "";
-      });
+      const hmacBytes = await window.crypto.subtle.sign(
+        "HMAC",
+        key,
+        new Uint8Array(counterBytes),
+      );
+
+      const offset = hmacBytes.byteLength - 1;
+      const truncated =
+        new DataView(hmacBytes).getUint32(offset - 3) & 0x7fffffff;
+      const pinValue = (truncated % Math.pow(10, digits))
+        .toString()
+        .padStart(digits, "0");
+      const formatted = pinValue.match(/.{1,3}/g)?.join(" ");
+
+      return format && formatted ? formatted : pinValue;
+    } catch (error) {
+      console.error("Error generating OTP:", error);
+      return "";
+    }
   }
 
   private static intToBytes(num: number): Uint8Array {

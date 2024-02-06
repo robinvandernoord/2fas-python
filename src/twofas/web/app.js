@@ -1,24 +1,26 @@
 // totp.ts
 class TOTP {
-  static generateOTP(secret, options) {
-    const { period = 30, digits = 6, format = false } = options || {};
+  static async generateOTP(secret, {
+    period = 30,
+    digits = 6,
+    format = false
+  } = {}) {
     const epoch = Math.floor(Date.now() / 1000);
     const counter = Math.floor(epoch / period);
     const counterBytes = this.intToBytes(counter);
     const secretBytes = this.stringToBytes(secret);
-    const hmac = window.crypto.subtle.importKey("raw", secretBytes, { name: "HMAC", hash: "SHA-1" }, false, [
-      "sign"
-    ]).then((key) => window.crypto.subtle.sign("HMAC", key, new Uint8Array(counterBytes)));
-    return hmac.then((hmacBytes) => {
+    try {
+      const key = await window.crypto.subtle.importKey("raw", secretBytes, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+      const hmacBytes = await window.crypto.subtle.sign("HMAC", key, new Uint8Array(counterBytes));
       const offset = hmacBytes.byteLength - 1;
       const truncated = new DataView(hmacBytes).getUint32(offset - 3) & 2147483647;
       const pinValue = (truncated % Math.pow(10, digits)).toString().padStart(digits, "0");
       const formatted = pinValue.match(/.{1,3}/g)?.join(" ");
       return format && formatted ? formatted : pinValue;
-    }).catch((error) => {
+    } catch (error) {
       console.error("Error generating OTP:", error);
       return "";
-    });
+    }
   }
   static intToBytes(num) {
     const arr = new ArrayBuffer(8);
