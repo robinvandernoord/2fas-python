@@ -63,7 +63,7 @@
      * @param {HTMLImageElement} $image
      */
     function new_row($image){
-        const $row = new HTMLDivElement()
+        const $row = document.createElement("div")
         $row.appendChild($image)
         return $row
     }

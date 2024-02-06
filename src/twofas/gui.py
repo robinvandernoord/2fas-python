@@ -5,22 +5,16 @@ import types
 import typing
 import warnings
 from pathlib import Path
+from typing import Any, Optional
 from zipfile import ZipFile
 
 import requests
+from threadful import ThreadWithReturn, thread
 
-try:
-    from result import Err, Ok, Result
-    from threadful import ThreadWithReturn, thread
-except ImportError:
-    # when the [gui] extra is not installed
-    # an error will be thrown later.
-    Ok = typing.Any  # type: ignore
-    Err = typing.Any  # type: ignore
-    Result = typing.Any  # type: ignore
+# todo: extract to separate gui lib
 
 
-def has_eel() -> tuple[typing.Optional[types.ModuleType], typing.Optional[ImportError]]:
+def has_eel() -> tuple[Optional[types.ModuleType], Optional[ImportError]]:
     try:
         # import gevent.monkey
         # gevent.monkey.patch_all()
@@ -123,7 +117,7 @@ threadedfunction: typing.TypeAlias = typing.Callable[[], ThreadWithReturn[T]]
 
 class EelWithJavascript(typing.Protocol):
     # eel:
-    expose: typing.Callable[[typing.Callable[..., typing.Any]], None]
+    expose: typing.Callable[[typing.Callable[..., Any]], None]
 
     # js:
     python_task_started: typing.Callable[[str], None]
@@ -133,13 +127,15 @@ class EelWithJavascript(typing.Protocol):
 
 class GUI:
     icons: dict[str, list[str]]
-    tasks: dict[str, tuple[threadedfunction[typing.Any], typing.Callable[[typing.Any], None] | None]]
+    tasks: dict[str, tuple[threadedfunction[Any], typing.Callable[[Any], None] | None]]
     js: EelWithJavascript
 
-    _threads: dict[str, ThreadWithReturn[typing.Any]]
-    _callbacks: dict[str, typing.Callable[[typing.Any], None] | None]
+    _threads: dict[str, ThreadWithReturn[Any]]
+    _callbacks: dict[str, typing.Callable[[Any], None] | None]
+    _verbose: bool = False
+    _log: typing.Callable[..., None]
 
-    def __init__(self) -> None:
+    def __init__(self, verbose: bool = False) -> None:
         self.icons = {}
         self.tasks = {
             "load_icons": (load_icons, self.icons.update),  # todo: deal with dark/light etc.
@@ -147,6 +143,18 @@ class GUI:
 
         self._threads = {}
         self._callbacks = {}
+        if verbose:
+            self._verbose = True
+            self._log = self._log_verbose
+        else:
+            self._log = self._noop
+
+    def _noop(self, *_: Any, **__: Any) -> None:
+        return
+
+    def _log_verbose(self, *args: Any, **kwargs: Any) -> None:
+        kwargs.setdefault("file", sys.stderr)
+        print(*args, **kwargs)
 
     def _start(self) -> None:
         eel, e = has_eel()
@@ -159,6 +167,7 @@ class GUI:
             return
 
         eel.init(str(WEB_DIR))
+        self._log("eel.init", WEB_DIR)
         eel.start("main.html", port=0, block=False, **calc_window_size())
 
         self.js = typing.cast(EelWithJavascript, eel)
@@ -173,24 +182,33 @@ class GUI:
 
     def _start_tasks(self) -> None:
         for key, (threadfunc, then) in self.tasks.copy().items():
+            self._log("start task", key)
             self._threads[key] = threadfunc()
             self._callbacks[key] = then
             del self.tasks[key]
             self.js.python_task_started(key)
 
+        self._log("end of start tasks", self._threads)
+
     def _check_tasks(self) -> None:
-        for key, thread in self._threads.copy().items():
-            if thread.is_alive():
+        for key, thrd in self._threads.copy().items():
+            self._log("check task", key, thrd)
+            if thrd.is_alive():
                 # still active
+                self._log(f"{key} still working")
                 continue
-            thread.join(1)
-            result = thread.result().unwrap()
-            del thread
+
+            self._log(f"{key} is done:", end=" ")
+            result = thrd.join(1)
+            self._log(result)
+            del thrd
             del self._threads[key]
             if then := self._callbacks.get(key):
+                self._log(f"Running callback for {key}", then)
                 then(result)
                 del self._callbacks[key]
-                self.js.python_task_completed(key)
+
+            self.js.python_task_completed(key)
 
     def _auto_expose(self) -> None:
         # expose every non-internal function to JS
@@ -198,6 +216,7 @@ class GUI:
             getattr(self, func) for func in dir(self) if not func.startswith("_") and callable(getattr(self, func))
         ]
         for method in method_list:
+            self._log("js.expose", method)
             self.js.expose(method)
 
     # public JS methods:
@@ -205,6 +224,7 @@ class GUI:
         print("JS says hello!", file=sys.stderr)
 
     def load_image(self, uuid: str) -> str:
+        self._log("start load image", uuid)
         for icon_uuid in self.icons.get(uuid, []):
             path = ICON_DIR / f"{icon_uuid}.png"
 
@@ -213,12 +233,14 @@ class GUI:
 
             base64_utf8_str = base64.b64encode(path.read_bytes()).decode()
 
+            self._log("end load image", len(base64_utf8_str))
             return f"data:image/png;base64,{base64_utf8_str}"
 
         # else: nothing found :/
+        self._log("end load image", 0)
         return ""
 
 
-def start_gui() -> None:
-    gui = GUI()
+def start_gui(verbose: bool = False) -> None:
+    gui = GUI(verbose=verbose)
     gui._start()

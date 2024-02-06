@@ -5,6 +5,7 @@ This file contains the Typer CLI.
 import os
 import sys
 import typing
+from typing import Optional
 
 import questionary
 import rich
@@ -34,7 +35,7 @@ app = typer.Typer()
 TwoFactorDetailStorage: typing.TypeAlias = TwoFactorStorage[TwoFactorAuthDetails]
 
 
-def prepare_to_generate(filename: str = None) -> TwoFactorDetailStorage:
+def prepare_to_generate(filename: Optional[str] = None) -> TwoFactorDetailStorage:
     """
     Clear old keyring entries (from previous sessions) and decrypt the selected 2fas file.
     """
@@ -100,7 +101,7 @@ def show_service_info_interactive(services: TwoFactorDetailStorage) -> None:
 
 
 @clear
-def command_interactive(filename: str = None) -> None:
+def command_interactive(filename: Optional[str] = None) -> None:
     """
     Interactive menu when using 2fas without any action flags.
     """
@@ -259,7 +260,7 @@ def set_default_file_interactive(filename: str) -> None:
 
 
 @clear()
-def command_manage_files(filename: str = None) -> None:
+def command_manage_files(filename: Optional[str] = None) -> None:
     """
     Interactive menu (after Settings) to manage known files.
     """
@@ -456,7 +457,7 @@ def main(
     elif self_update:
         return command_update()
     elif gui:
-        return start_gui()
+        return start_gui(verbose)
 
     # stateful:
 
