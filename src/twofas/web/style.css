@@ -59,6 +59,14 @@ body {
   margin-right: 10px;
 }
 
+.icon img {
+  aspect-ratio: 1;
+  width: 100%; /* Make the image responsive */
+  max-width: 40px; /* Limit the maximum width of the image */
+  height: auto; /* Maintain aspect ratio */
+  margin-right: 10px;
+}
+
 .entry-details {
   flex-grow: 1;
   color: var(--white); /* Text color */

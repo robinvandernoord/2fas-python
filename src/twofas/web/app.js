@@ -1,99 +1,97 @@
-"use strict";
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
+// totp.ts
+class TOTP {
+  static generateOTP(secret, options) {
+    const { period = 30, digits = 6, format = false } = options || {};
+    const epoch = Math.floor(Date.now() / 1000);
+    const counter = Math.floor(epoch / period);
+    const counterBytes = this.intToBytes(counter);
+    const secretBytes = this.stringToBytes(secret);
+    const hmac = window.crypto.subtle.importKey("raw", secretBytes, { name: "HMAC", hash: "SHA-1" }, false, [
+      "sign"
+    ]).then((key) => window.crypto.subtle.sign("HMAC", key, new Uint8Array(counterBytes)));
+    return hmac.then((hmacBytes) => {
+      const offset = hmacBytes.byteLength - 1;
+      const truncated = new DataView(hmacBytes).getUint32(offset - 3) & 2147483647;
+      const pinValue = (truncated % Math.pow(10, digits)).toString().padStart(digits, "0");
+      const formatted = pinValue.match(/.{1,3}/g)?.join(" ");
+      return format && formatted ? formatted : pinValue;
+    }).catch((error) => {
+      console.error("Error generating OTP:", error);
+      return "";
     });
+  }
+  static intToBytes(num) {
+    const arr = new ArrayBuffer(8);
+    const view = new DataView(arr);
+    view.setBigUint64(0, BigInt(num), false);
+    return new Uint8Array(arr);
+  }
+  static stringToBytes(str) {
+    return new TextEncoder().encode(str);
+  }
+}
+
+// app.ts
+var render_template = function(template_id, variables) {
+  const template = document.getElementById(template_id);
+  if (!template) {
+    throw `Template ${template} not found.`;
+  }
+  let content = template.innerHTML;
+  content = content.replace(/\${(.*?)}/g, (_, variable) => {
+    return variables[variable.trim()] ?? "";
+  });
+  const tmp_container = document.createElement("div");
+  tmp_container.innerHTML = content;
+  return tmp_container.firstElementChild ?? tmp_container;
 };
-function render_template(template_id, variables) {
-    var _a;
-    const template = document.getElementById(template_id);
-    if (!template) {
-        throw `Template ${template} not found.`;
-    }
-    console.log({
-        template,
-        template_id,
-        variables,
+var new_totp_entry = function(data) {
+  const entry = render_template("totp-entry", data);
+  $totp_holder.appendChild(entry);
+};
+var new_image = function(b64) {
+  const $image = new Image;
+  $image.src = b64;
+  return $image;
+};
+var new_row = function($image) {
+  const $row = document.createElement("div");
+  $row.appendChild($image);
+  return $row;
+};
+var to_holder = function($row) {
+  return $imageholder.appendChild($row);
+};
+var hello = function() {
+  console.debug("Python says hello!");
+  Python.hello();
+};
+var python_task_started = function(task) {
+  console.debug(`${task} started in Python.`);
+};
+async function python_task_completed(task) {
+  console.debug(`${task} completed in Python.`);
+  if (task === "load_icons") {
+    Python.load_image("fff32440-f5be-4b9c-b471-f37d421f10c3").then(new_image).then(new_row).then(to_holder);
+    Python.load_image("708df726-fb8b-4c01-8990-f2da0cd33839").then(new_image).then(new_row).then(to_holder);
+  }
+}
+async function main() {
+  const services = await Python.get_services();
+  services.forEach(async (service) => {
+    const code = await TOTP.generateOTP(service.secret, { format: true });
+    const image = await Python.load_image(service.icon.iconCollection.id);
+    new_totp_entry({
+      service: service.name,
+      username: "",
+      code,
+      image
     });
-    // Get the template content
-    let content = template.innerHTML;
-    // Interpolate variables into template content
-    content = content.replace(/\${(.*?)}/g, (_, variable) => {
-        var _a;
-        return (_a = variables[variable.trim()]) !== null && _a !== void 0 ? _a : "";
-    });
-    // Create a temporary container to hold the parsed HTML
-    const tmp_container = document.createElement("div");
-    tmp_container.innerHTML = content;
-    // Get the template content after interpolation
-    return (_a = tmp_container.firstElementChild) !== null && _a !== void 0 ? _a : tmp_container; // contents OR empty div
+  });
 }
-const $totp_holder = document.getElementById("totp-holder");
-function new_totp_entry(data) {
-    const entry = render_template("totp-entry", data);
-    $totp_holder.appendChild(entry);
-}
-// for (let i = 0; i < 20; i++) {
-//   let data = {
-//     service: "Wordpress",
-//     username: "Henk",
-//     code: String(i),
-//     countdown: 3,
-//   };
-//   new_totp_entry(data);
-// }
-function new_image(b64) {
-    const $image = new Image();
-    $image.src = b64;
-    return $image;
-}
-function new_row($image) {
-    const $row = document.createElement("div");
-    $row.appendChild($image);
-    return $row;
-}
-const $imageholder = document.getElementById("imageholder");
-function to_holder($row) {
-    return $imageholder.appendChild($row);
-}
-function hello() {
-    console.debug("Python says hello!");
-    Python.hello();
-}
+var $totp_holder = document.getElementById("totp-holder");
+var $imageholder = document.getElementById("imageholder");
 eel.expose(hello);
-function python_task_started(task) {
-    console.debug(`${task} started in Python.`);
-}
 eel.expose(python_task_started);
-function python_task_completed(task) {
-    return __awaiter(this, void 0, void 0, function* () {
-        console.debug(`${task} completed in Python.`);
-        if (task === "load_icons") {
-            // github icon
-            Python.load_image("fff32440-f5be-4b9c-b471-f37d421f10c3")
-                .then(new_image)
-                .then(new_row)
-                .then(to_holder);
-            // wordpress icon
-            Python.load_image("708df726-fb8b-4c01-8990-f2da0cd33839")
-                .then(new_image)
-                .then(new_row)
-                .then(to_holder);
-        }
-    });
-}
 eel.expose(python_task_completed, "python_task_completed");
-function main() {
-    return __awaiter(this, void 0, void 0, function* () {
-        // todo: check password/auth
-        const services = yield Python.get_services();
-        console.log({
-            services,
-        });
-    });
-}
 main();

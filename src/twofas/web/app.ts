@@ -1,15 +1,5 @@
-interface TPython {
-  // functions (here for typing only):
-  load_image: (_: string) => Promise<string>;
-  hello: () => null; // noop
-  get_services: () => Promise<TotpEntry[]>;
-}
-
-type AnyFunc = (..._: any[]) => any;
-
-interface Eel {
-  expose: (_: AnyFunc, name?: string) => void;
-}
+import TOTP from "./totp";
+import { TPython, Eel, TotpEntry } from "./_types";
 
 declare var Python: TPython;
 declare var eel: Eel;
@@ -21,12 +11,6 @@ function render_template(template_id: string, variables: AnyDict) {
   if (!template) {
     throw `Template ${template} not found.`;
   }
-
-  console.log({
-    template,
-    template_id,
-    variables,
-  });
 
   // Get the template content
   let content = template.innerHTML;
@@ -46,27 +30,10 @@ function render_template(template_id: string, variables: AnyDict) {
 
 const $totp_holder = document.getElementById("totp-holder") as HTMLDivElement;
 
-type TotpEntry = {
-  service: string;
-  username: string;
-  code: string;
-  countdown: number;
-};
-
 function new_totp_entry(data: TotpEntry) {
   const entry = render_template("totp-entry", data);
   $totp_holder.appendChild(entry);
 }
-
-// for (let i = 0; i < 20; i++) {
-//   let data = {
-//     service: "Wordpress",
-//     username: "Henk",
-//     code: String(i),
-//     countdown: 3,
-//   };
-//   new_totp_entry(data);
-// }
 
 function new_image(b64: string) {
   const $image = new Image();
@@ -118,15 +85,25 @@ async function python_task_completed(task: string) {
 
 eel.expose(python_task_completed, "python_task_completed");
 
-// count down: 
+// count down:
 // setInterval(() => (console.log(30 - Math.round(new Date() / 1000) % 30)), 1000)
 
 async function main() {
   // todo: check password/auth
 
-  const services = await Python.get_services();
-  console.log({
-    services,
+  const services = await Python.get_services(/* password */);
+
+  services.forEach(async (service) => {
+    const code = await TOTP.generateOTP(service.secret, { format: true });
+
+    const image = await Python.load_image(service.icon.iconCollection.id);
+
+    new_totp_entry({
+      service: service.name,
+      username: "",
+      code,
+      image,
+    });
   });
 }
 
