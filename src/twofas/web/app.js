@@ -32,6 +32,10 @@ class TOTP {
 }
 
 // app.ts
+var setIntervalImmediately = function(func, interval) {
+  func();
+  return setInterval(func, interval);
+};
 var render_template = function(template_id, variables) {
   const template = document.getElementById(template_id);
   if (!template) {
@@ -45,22 +49,17 @@ var render_template = function(template_id, variables) {
   tmp_container.innerHTML = content;
   return tmp_container.firstElementChild ?? tmp_container;
 };
-var new_totp_entry = function(data) {
+var new_totp_entry = function(data, secret) {
   const entry = render_template("totp-entry", data);
   $totp_holder.appendChild(entry);
-};
-var new_image = function(b64) {
-  const $image = new Image;
-  $image.src = b64;
-  return $image;
-};
-var new_row = function($image) {
-  const $row = document.createElement("div");
-  $row.appendChild($image);
-  return $row;
-};
-var to_holder = function($row) {
-  return $imageholder.appendChild($row);
+  const $code_holder = entry.querySelector(".entry-code");
+  if (!$code_holder) {
+    return;
+  }
+  setIntervalImmediately(async () => {
+    const code = await TOTP.generateOTP(secret, { format: true });
+    $code_holder.innerHTML = code;
+  }, 1000);
 };
 var hello = function() {
   console.debug("Python says hello!");
@@ -72,25 +71,31 @@ var python_task_started = function(task) {
 async function python_task_completed(task) {
   console.debug(`${task} completed in Python.`);
   if (task === "load_icons") {
-    Python.load_image("fff32440-f5be-4b9c-b471-f37d421f10c3").then(new_image).then(new_row).then(to_holder);
-    Python.load_image("708df726-fb8b-4c01-8990-f2da0cd33839").then(new_image).then(new_row).then(to_holder);
   }
 }
+var current_countdown_value = function() {
+  return 30 - Math.round(new Date().getTime() / 1000) % 30;
+};
+var update_countdown = function() {
+  const value = String(current_countdown_value());
+  document.querySelectorAll(".counter-circle").forEach(($counter) => {
+    $counter.innerHTML = value;
+  });
+};
 async function main() {
+  setIntervalImmediately(update_countdown, 1000);
   const services = await Python.get_services();
   services.forEach(async (service) => {
-    const code = await TOTP.generateOTP(service.secret, { format: true });
     const image = await Python.load_image(service.icon.iconCollection.id);
     new_totp_entry({
       service: service.name,
       username: "",
-      code,
+      code: "",
       image
-    });
+    }, service.secret);
   });
 }
 var $totp_holder = document.getElementById("totp-holder");
-var $imageholder = document.getElementById("imageholder");
 eel.expose(hello);
 eel.expose(python_task_started);
 eel.expose(python_task_completed, "python_task_completed");

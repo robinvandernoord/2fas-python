@@ -14,8 +14,14 @@
 
   <body>
     <main>
-      <div class="search-container">
+      <!-- <div class="search-container">
         <input type="text" placeholder="Filter..." class="search-bar" />
+      </div> -->
+      <div class="header">
+        <div class="search-container">
+          <input type="text" placeholder="Search..." class="search-bar" />
+        </div>
+        <div class="counter-circle"></div>
       </div>
 
       <div id="totp-holder" class="totp-list"></div>
@@ -27,9 +33,8 @@
         <div class="entry-details">
           <div class="entry-name">${service}</div>
           <div class="entry-username">${username}</div>
-          <div class="entry-code">${code}</div>
         </div>
-        <div class="counter-circle">0</div>
+        <div class="entry-code">${code}</div>
       </div>
     </template>
 
