@@ -48,6 +48,8 @@ dev = [
 
 gui = [
     "eel",
+    "screeninfo",
+    "threadful",
     "result",
 ]
 
