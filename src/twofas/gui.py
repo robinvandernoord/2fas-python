@@ -1,4 +1,5 @@
 import base64
+import datetime as dt
 import json
 import sys
 import types
@@ -266,12 +267,21 @@ class GUI:
 
     def get_services(self) -> list[AnyDict]:
         # todo: don't hard code
-        # store in self
+        #   cache in self
         services = load_services("/home/robin/Nextcloud/2fa/2fas-backup-20240117132052.2fas")
         return [s.as_dict() for s in services]
 
-    def totp(self, secret: str) -> str:
-        return TOTP(secret).now()
+    def get_service(self, idx: str | int) -> AnyDict:
+        services = self.get_services()
+        return services[int(idx)]
+
+    def totp(self, secret: str, delta_sec: int = 0) -> str:
+        # return TOTP(secret).now()
+        generator = TOTP(secret)
+        when = dt.datetime.now()
+        if delta_sec:
+            when += dt.timedelta(seconds=int(delta_sec))
+        return generator.generate_otp(generator.timecode(when))
 
     def load_image(self, uuid: str) -> str:
         self._log("start load image", uuid)

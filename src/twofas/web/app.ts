@@ -1,51 +1,17 @@
 import { TPython, Eel, TotpEntry } from "./_types";
+import {
+  auth_details_to_totp_entry,
+  copy_current_code,
+  current_countdown_value,
+  render_template,
+  setIntervalImmediately,
+  totp_format,
+} from "./helpers";
 
 declare var Python: TPython;
 declare var eel: Eel;
 
-type AnyDict = { [key: string]: any };
-
-/**
- * Like setInterval but with an invocation at t=0 as well
- */
-function setIntervalImmediately(func: () => any, interval: number): number {
-  func();
-  return setInterval(func, interval);
-}
-
-function render_template(template_id: string, variables: AnyDict): HTMLElement {
-  const template = document.getElementById(template_id);
-  if (!template) {
-    throw `Template ${template} not found.`;
-  }
-
-  // Get the template content
-  let content = template.innerHTML;
-
-  // Interpolate variables into template content
-  content = content.replace(/\${(.*?)}/g, (_, variable: string) => {
-    return variables[variable.trim()] ?? "";
-  });
-
-  // Create a temporary container to hold the parsed HTML
-  const tmp_container = document.createElement("div");
-  tmp_container.innerHTML = content;
-
-  // Get the template content after interpolation
-  return (tmp_container.firstElementChild ?? tmp_container) as HTMLElement;
-  // contents OR empty div
-}
-
 const $totp_holder = document.getElementById("totp-holder") as HTMLDivElement;
-
-function copy_current_code($code_holder: HTMLDivElement) {
-  const current_code = $code_holder.dataset.code;
-  if (current_code) {
-    navigator.clipboard.writeText(current_code);
-  } else {
-    console.error("No current code?");
-  }
-}
 
 function new_totp_entry(data: TotpEntry, secret: string) {
   const entry = render_template("totp-entry", data);
@@ -53,6 +19,7 @@ function new_totp_entry(data: TotpEntry, secret: string) {
 
   // store all data:
   Object.assign(entry.dataset, {
+    idx: data.idx,
     icon_id: data.icon_id,
     service: data.service.toLowerCase(),
     username: data.username?.toLowerCase() ?? "",
@@ -62,8 +29,13 @@ function new_totp_entry(data: TotpEntry, secret: string) {
 
   const $code_holder = entry.querySelector(".entry-code") as HTMLDivElement;
 
+  entry.addEventListener("click", (event) => {
+    const idx = entry.dataset.idx;
+    window.location.href = `entry.html?idx=${idx}`;
+  });
+
   let t = 0; // timeout
-  $code_holder.addEventListener("click", async (_) => {
+  $code_holder.addEventListener("click", async (event) => {
     clearTimeout(t);
     // keep active for some longer:
     $code_holder.classList.add("active");
@@ -72,11 +44,13 @@ function new_totp_entry(data: TotpEntry, secret: string) {
     }, 1000);
 
     copy_current_code($code_holder);
+
+    event.stopPropagation(); // no click on outer scope
   });
 
   setIntervalImmediately(async () => {
     const code = await Python.totp(secret);
-    const formatted = code.match(/.{1,3}/g)?.join(" ") ?? code;
+    const formatted = totp_format(code);
     $code_holder.dataset.code = code;
     $code_holder.innerHTML = formatted;
   }, 1_000);
@@ -127,10 +101,6 @@ async function python_task_completed(task: string) {
 
 eel.expose(python_task_completed, "python_task_completed");
 
-function current_countdown_value() {
-  return 30 - (Math.round(new Date().getTime() / 1000) % 30);
-}
-
 function update_countdown() {
   const value = String(current_countdown_value());
 
@@ -142,18 +112,10 @@ function update_countdown() {
 async function init_services() {
   const services = await Python.get_services(/* password */);
 
-  const promises = services.map(async (service) => {
-    const image = await Python.load_image(service.icon.iconCollection.id);
+  const promises = services.map(async (service, idx) => {
+    const entry = await auth_details_to_totp_entry(idx, service);
 
-    new_totp_entry(
-      {
-        icon_id: service.icon.iconCollection.id,
-        service: service.name,
-        username: service.otp.account ?? service.otp.label ?? "",
-        image,
-      },
-      service.secret,
-    );
+    new_totp_entry(entry, service.secret);
 
     return true;
   });
@@ -178,7 +140,7 @@ function apply_alternating_background_colors() {
 
 const $search = document.getElementById("search") as HTMLInputElement;
 
-function search(event: Event) {
+function search(_: Event) {
   const query = $search.value.toLowerCase();
 
   const entries = document.querySelectorAll(
@@ -213,7 +175,6 @@ async function main() {
   setIntervalImmediately(update_countdown, 1000);
 
   await init_services();
-
   await setup_search();
 }
 

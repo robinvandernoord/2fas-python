@@ -1,9 +1,9 @@
-// app.ts
-var setIntervalImmediately = function(func, interval) {
+// helpers.ts
+function setIntervalImmediately(func, interval) {
   func();
   return setInterval(func, interval);
-};
-var render_template = function(template_id, variables) {
+}
+function render_template(template_id, variables) {
   const template = document.getElementById(template_id);
   if (!template) {
     throw `Template ${template} not found.`;
@@ -15,36 +15,60 @@ var render_template = function(template_id, variables) {
   const tmp_container = document.createElement("div");
   tmp_container.innerHTML = content;
   return tmp_container.firstElementChild ?? tmp_container;
-};
-var copy_current_code = function($code_holder) {
+}
+async function auth_details_to_totp_entry(idx, service) {
+  const image = await Python.load_image(service.icon.iconCollection.id);
+  return {
+    icon_id: service.icon.iconCollection.id,
+    service: service.name,
+    username: service.otp.account ?? service.otp.label ?? "",
+    idx,
+    image
+  };
+}
+function current_countdown_value() {
+  return 30 - Math.round(new Date().getTime() / 1000) % 30;
+}
+function totp_format(code) {
+  return code.match(/.{1,3}/g)?.join(" ") ?? code;
+}
+function copy_current_code($code_holder) {
   const current_code = $code_holder.dataset.code;
   if (current_code) {
     navigator.clipboard.writeText(current_code);
   } else {
     console.error("No current code?");
   }
-};
+}
+
+// app.ts
 var new_totp_entry = function(data, secret) {
   const entry = render_template("totp-entry", data);
   $totp_holder.appendChild(entry);
   Object.assign(entry.dataset, {
+    idx: data.idx,
     icon_id: data.icon_id,
     service: data.service.toLowerCase(),
     username: data.username?.toLowerCase() ?? ""
   });
   const $code_holder = entry.querySelector(".entry-code");
+  entry.addEventListener("click", (event) => {
+    const idx = entry.dataset.idx;
+    window.location.href = `entry.html?idx=${idx}`;
+  });
   let t = 0;
-  $code_holder.addEventListener("click", async (_) => {
+  $code_holder.addEventListener("click", async (event) => {
     clearTimeout(t);
     $code_holder.classList.add("active");
     t = setTimeout(() => {
       $code_holder.classList.remove("active");
     }, 1000);
     copy_current_code($code_holder);
+    event.stopPropagation();
   });
   setIntervalImmediately(async () => {
     const code = await Python.totp(secret);
-    const formatted = code.match(/.{1,3}/g)?.join(" ") ?? code;
+    const formatted = totp_format(code);
     $code_holder.dataset.code = code;
     $code_holder.innerHTML = formatted;
   }, 1000);
@@ -78,9 +102,6 @@ async function python_task_completed(task) {
     fix_missing_icons();
   }
 }
-var current_countdown_value = function() {
-  return 30 - Math.round(new Date().getTime() / 1000) % 30;
-};
 var update_countdown = function() {
   const value = String(current_countdown_value());
   document.querySelectorAll(".counter-circle").forEach(($counter) => {
@@ -89,14 +110,9 @@ var update_countdown = function() {
 };
 async function init_services() {
   const services = await Python.get_services();
-  const promises = services.map(async (service) => {
-    const image = await Python.load_image(service.icon.iconCollection.id);
-    new_totp_entry({
-      icon_id: service.icon.iconCollection.id,
-      service: service.name,
-      username: service.otp.account ?? service.otp.label ?? "",
-      image
-    }, service.secret);
+  const promises = services.map(async (service, idx) => {
+    const entry = await auth_details_to_totp_entry(idx, service);
+    new_totp_entry(entry, service.secret);
     return true;
   });
   Promise.all(promises).then(apply_alternating_background_colors);
@@ -111,7 +127,7 @@ var apply_alternating_background_colors = function() {
     }
   });
 };
-var search = function(event) {
+var search = function(_) {
   const query = $search.value.toLowerCase();
   const entries = document.querySelectorAll(".totp-entry");
   entries.forEach((entry) => {

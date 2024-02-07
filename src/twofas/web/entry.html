@@ -1,0 +1,29 @@
+<title>2fas - todo</title>
+<link href="global.css" rel="stylesheet" />
+<link href="entry.css" rel="stylesheet" />
+
+<body>
+  <div class="entry-page">
+    <div class="header">
+      <div id="counter-circle" class="counter-circle"></div>
+    </div>
+    <div id="entry-details" class="entry-details"></div>
+  </div>
+
+  <template id="entry-details-template">
+    <div>
+      <div class="icon"><img src="${image}" alt="" /></div>
+      <div class="entry-name">${service}</div>
+      <div class="entry-username">${username}</div>
+      <div class="entry-codes">
+        <div class="totp-code previous-code" data-delta="-30"></div>
+        <div class="totp-code entry-code" data-delta="0"></div>
+        <div class="totp-code next-code" data-delta="30"></div>
+      </div>
+    </div>
+  </template>
+
+  <script type="text/javascript" src="/eel.js"></script>
+  <script type="text/javascript" src="eel-abstract.js"></script>
+  <script src="entry.js"></script>
+</body>

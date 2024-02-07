@@ -1,9 +1,12 @@
+export type AnyDict = { [key: string]: any };
+
 export type TotpEntry = {
   service: string;
   username: string | null;
   // code: string;
   image?: string | null;
   icon_id: string;
+  idx?: number | string; // not a real id but the index in the list of services
 };
 
 export interface OtpDetails {
@@ -44,7 +47,8 @@ export interface TPython {
   load_image: (_: string) => Promise<string>;
   hello: () => null; // noop
   get_services: () => Promise<TwoFactorAuthDetails[]>;
-  totp: (secret: string) => Promise<string>;
+  get_service: (idx: string | number) => Promise<TwoFactorAuthDetails>;
+  totp: (secret: string, delta_sec?: number | string) => Promise<string>;
 }
 
 export type AnyFunc = (..._: any[]) => any;

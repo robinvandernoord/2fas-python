@@ -1,0 +1,80 @@
+/* Entry page styles */
+.entry-page {
+  font-family: Arial, sans-serif;
+  background-color: var(--primary-background-color); /* Dark background color */
+  padding: 20px;
+  margin: 0; /* Remove default margin */
+}
+
+.header {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 20px;
+}
+
+.counter-circle {
+  width: 50px;
+  height: 50px;
+  border-radius: 50%;
+  background-color: var(
+    --primary-color
+  ); /* Fill the circle with primary color */
+  color: #fff; /* White color for text */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  font-size: 16px;
+}
+
+.entry-details {
+  background-color: var(--dark-bg); /* Darker background color */
+  border-radius: 5px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.entry-codes {
+  background-color: var(--darker-bg);
+  border-radius: 5px;
+  padding: 10px;
+}
+
+.icon img {
+  width: 100px; /* Adjust image width as needed */
+  height: auto;
+  margin-bottom: 20px;
+}
+
+.entry-name {
+  font-size: 24px;
+  font-weight: bold;
+  color: var(--white); /* Primary color for text */
+  margin-bottom: 10px;
+}
+
+.entry-username {
+  font-size: 18px;
+  color: var(--white); /* Primary color for text */
+  margin-bottom: 10px;
+}
+
+.next-code {
+  font-weight: bold;
+}
+
+.entry-code,
+.previous-code,
+.next-code {
+  font-size: 36px;
+  text-align: center;
+  color: var(--primary-color); /* Primary color for TOTP code */
+  margin-bottom: 10px;
+}
+
+.previous-code,
+.next-code {
+  font-size: 20px;
+  color: var(--primary-color); /* Primary color for TOTP code */
+}

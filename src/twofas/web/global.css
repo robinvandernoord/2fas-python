@@ -1,0 +1,18 @@
+:root {
+  /* --primary-color: #007bff; */
+  --primary-color: #00c896;
+  --primary-dark: #629c85;
+  --darker-bg: #1e1e1e;
+  --dark-bg: #2b2b2b;
+  --light-bg: #383838;
+  --white: #fff;
+}
+
+/* Body styles */
+body {
+  font-family: Arial, sans-serif;
+  background-color: var(--darker-bg); /* Dark background color */
+  margin: 0;
+  padding: 0;
+  overflow-x: hidden; /* Hide horizontal scrollbar */
+}
