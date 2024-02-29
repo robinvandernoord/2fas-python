@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v1.0.2 (2024-02-29)
+
+### Fix
+
+* Explicitly add typing-extensions as dependency ([`2f5c7ab`](https://github.com/robinvandernoord/2fas-python/commit/2f5c7ab92a12e0568dad40f29446187895db2e91))
+
 ## v1.0.1 (2024-01-29)
 
 ### Feature
