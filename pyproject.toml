@@ -27,6 +27,7 @@ dependencies = [
     "configuraptor>=1.25",
     "typer[all]",
     "questionary",
+    "typing-extensions",
 ]
 
 [template.plugins.default]
