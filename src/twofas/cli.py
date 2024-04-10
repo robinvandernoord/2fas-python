@@ -454,6 +454,8 @@ def main(
     elif self_update:
         return command_update()
 
+    args = args or []
+
     # stateful:
 
     settings = load_cli_settings()
