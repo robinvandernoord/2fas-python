@@ -1,6 +1,7 @@
 import base64
 import datetime as dt
 import json
+import subprocess
 import sys
 import typing
 from pathlib import Path
@@ -9,11 +10,15 @@ from zipfile import ZipFile
 
 import eel
 import requests
+from configuraptor import asdict
 from lib2fas import load_services
 from lib2fas._types import AnyDict
 from pyotp import TOTP
+from result import Err, Ok, Result
 from screeninfo import get_monitors
 from threadful import ThreadWithReturn, thread
+
+from .cli_settings import load_cli_settings
 
 WEB_DIR = Path(__file__).parent / "web"
 CACHE_DIR = Path("~/.cache").expanduser() / "2fas"
@@ -35,6 +40,26 @@ def center_position(screen_size: tuple[int, int], window_size: tuple[int, int]) 
     y = (screen_height - window_height) // 2
 
     return (x, y)
+
+
+def zenity(*args, **kwargs) -> Result[str, str]:
+    # Run the zenity command to open a file selection dialog
+    args = list(args)
+    for key, value in kwargs.items():
+        if value is True:
+            args.append(f"--{key}")
+        elif value is False:
+            continue
+        else:
+            args.append(f"--{key}={value}")
+
+    result = subprocess.run(["zenity", *args], capture_output=True, text=True)
+    # Check if the process completed successfully
+    if result.returncode == 0:
+        # Print the selected file path
+        return Ok(result.stdout.strip())
+    else:
+        return Err(result.stdout.strip() + result.stderr.strip())
 
 
 number = typing.TypeVar("number", int, float)
@@ -187,7 +212,7 @@ class GUI:
             min_width=400,
         )
 
-        eel.start("main.html", port=0, block=False, **sizes)
+        eel.start("login.html", port=0, block=False, **sizes)
 
         self.js = typing.cast(EelWithJavascript, eel)
         self._auto_expose()
@@ -239,6 +264,15 @@ class GUI:
             self.js.expose(method)
 
     # public JS methods:
+
+    def get_settings(self) -> AnyDict:
+
+        print(zenity("--file-selection"))
+
+        print(zenity("--list", "--column", "col1", "row1", "row2"))
+
+        return asdict(load_cli_settings())
+
     def hello(self) -> None:
         print("JS says hello!", file=sys.stderr)
 

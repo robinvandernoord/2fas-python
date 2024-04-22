@@ -42,12 +42,20 @@ export interface TwoFactorAuthDetails {
   icon: IconDetails;
   groupId?: string | null;
 }
+
+export interface TwoFasSettings {
+  files: string[] | null;
+  default_file: string | null;
+  auto_verbose: boolean;
+}
+
 export interface TPython {
   // functions (here for typing only):
   load_image: (_: string) => Promise<string>;
   hello: () => null; // noop
   get_services: () => Promise<TwoFactorAuthDetails[]>;
   get_service: (idx: string | number) => Promise<TwoFactorAuthDetails>;
+  get_settings: () => Promise<TwoFasSettings>;
   totp: (secret: string, delta_sec?: number | string) => Promise<string>;
 }
 
