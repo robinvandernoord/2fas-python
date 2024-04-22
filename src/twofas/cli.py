@@ -459,6 +459,8 @@ def main(
     elif gui:
         return start_gui(verbose)
 
+    args = args or []
+
     # stateful:
 
     settings = load_cli_settings()

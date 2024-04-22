@@ -17,17 +17,19 @@ pipx install 2fas
 ## Usage
 
 To see all available options, you can run:
+
 ```bash
 2fas --help
 ```
 
 If you simply run `2fas` or `2fas /path/to/file.2fas`, an interactive menu will show up.
 If you only want a specific TOTP code, you can run `2fas <service>` or `2fas /path/to/file.2fas <service>`.
-Multiple services can be specified: `2fas <service1> <service2> [/path/to/file.2fas]`. 
+Multiple services can be specified: `2fas <service1> <service2> [/path/to/file.2fas]`.
 Fuzzy matching is applied to (hopefully) catch some typo's.
 You can run `2fas --all` to generate codes for all TOTP in your `.2fas` file.
 
 ### Settings
+
 ```bash
 # see all settings:
 2fas --settings # shortcut: -s
@@ -37,8 +39,20 @@ You can run `2fas --all` to generate codes for all TOTP in your `.2fas` file.
 2fas --setting key value
 ```
 
-The `--settings`, `--setting` or `-s` flag can be used to read/write settings. 
-This can also be done from within the interactive menu. 
+The `--settings`, `--setting` or `-s` flag can be used to read/write settings.
+This can also be done from within the interactive menu.
+`2fas` cli settings are stored in `~/.config/2fas.toml` and contains the following settings:
+
+```toml
+[tool.2fas]
+files = [
+    "/some/path/to/file.2fas",
+    ... # list of known files, used by 'set default file' in the settings menu
+]
+default_file = "/some/path/to/file.2fas" # which file to use when no .2fas file was explicitly passed?
+auto_verbose = true # run every command as if --verbose was passed?
+
+```
 
 ### As a Library
 

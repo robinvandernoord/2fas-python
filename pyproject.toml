@@ -23,10 +23,11 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    "lib2fas",
+    "lib2fas>=0.1.7",
     "configuraptor>=1.25",
     "typer[all]",
     "questionary",
+    "typing-extensions",
 ]
 
 [template.plugins.default]
