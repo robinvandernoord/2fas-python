@@ -2,6 +2,16 @@
 
 <!--next-version-placeholder-->
 
+## v1.0.4 (2025-01-12)
+
+### Fix
+
+* Don't crash if expected 2fas file is missing, just show an error and disable some options (e.g. generating a TOTP) so you can still access and change settings. ([`3723d4c`](https://github.com/robinvandernoord/2fas-python/commit/3723d4c8d33273e5dca2bbd0f03750d0905dcba2))
+
+### Documentation
+
+* Extended README with 2fas cli config docs ([`01ac3b4`](https://github.com/robinvandernoord/2fas-python/commit/01ac3b4ea0ba6f8724b8ba0b543bff8daf3d54ec))
+
 ## v1.0.3 (2024-04-10)
 
 ### Fix
