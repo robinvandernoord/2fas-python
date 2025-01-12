@@ -18,11 +18,14 @@ DEFAULT_SETTINGS.touch(exist_ok=True)
 CONFIG_KEY = "tool.2fas"
 
 
-def expand_path(file: str | Path) -> str:
+def expand_path(file: str | Path | None) -> str:
     """
     Expand ~/... into /home/<user>/...
     """
-    return str(Path(file).expanduser())
+    if not file:
+        return ""
+
+    return str(Path(file).expanduser().absolute())
 
 
 def expand_paths(paths: typing.Iterable[str]) -> list[str]:
@@ -42,12 +45,12 @@ class CliSettings(TypedConfig, singleton.Singleton):
     default_file: str | None
     auto_verbose: bool = False
 
-    def add_file(self, filename: str | None, _config_file: str | Path = DEFAULT_SETTINGS) -> None:
+    def add_file(self, filename: str | None, _config_file: str | Path = DEFAULT_SETTINGS) -> str | None:
         """
         Add a new 2fas file to the configs history list.
         """
         if not filename:
-            return
+            return None
 
         filename = expand_path(filename)
 
@@ -58,6 +61,7 @@ class CliSettings(TypedConfig, singleton.Singleton):
             set_cli_setting("files", expand_paths(files), _config_file)
 
         self.files = expand_paths(files)
+        return expand_path(filename)
 
     def remove_file(self, filenames: str | typing.Iterable[str], _config_file: str | Path = DEFAULT_SETTINGS) -> None:
         """
@@ -66,11 +70,11 @@ class CliSettings(TypedConfig, singleton.Singleton):
         if isinstance(filenames, str | Path):
             filenames = [filenames]
 
-        filenames = set(expand_paths(filenames))
+        filenames_to_remove = set(expand_paths(filenames))
+        current_files = expand_paths(self.files or [])
+        files = [_ for _ in current_files if _ not in filenames_to_remove]
 
-        files = [expand_path(_) for _ in (self.files or []) if _ not in filenames]
-
-        if self.default_file in filenames:
+        if expand_path(self.default_file) in filenames_to_remove:
             new_default = files[0] if files else None
             set_cli_setting("default-file", new_default, _config_file)
             self.default_file = new_default

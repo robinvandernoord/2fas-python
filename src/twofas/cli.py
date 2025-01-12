@@ -33,12 +33,15 @@ app = typer.Typer()
 TwoFactorDetailStorage: typing.TypeAlias = TwoFactorStorage[TwoFactorAuthDetails]
 
 
-def prepare_to_generate(filename: str = None) -> TwoFactorDetailStorage:
+def prepare_to_generate(filename: str = None) -> TwoFactorDetailStorage | None:
     """
     Clear old keyring entries (from previous sessions) and decrypt the selected 2fas file.
     """
     keyring_manager.cleanup_keyring()
-    return load_services(filename or default_2fas_file())
+    filepath = filename or default_2fas_file()
+    if not (services := load_services(filepath)):
+        rich.print(f"[red]Error: {filepath} does not exit![/red]")
+    return services
 
 
 def print_for_service(service: TwoFactorAuthDetails) -> None:
@@ -48,7 +51,7 @@ def print_for_service(service: TwoFactorAuthDetails) -> None:
     service_name = service.name
     code = service.generate()
 
-    if state.verbose:
+    if state.verbose and service.otp:
         username = service.otp.account  # or .label ?
         rich.print(f"- {service_name} ({username}): {code}")
     else:
@@ -107,9 +110,8 @@ def command_interactive(filename: str = None) -> None:
         # get from settings or
         filename = default_2fas_file()
 
-    services = prepare_to_generate(filename)
-
-    rich.print(f"Active file: [blue]{filename}[/blue]")
+    if services := prepare_to_generate(filename):
+        rich.print(f"Active file: [blue]{filename}[/blue]")
 
     match questionary.select(
         "What do you want to do?",
@@ -119,18 +121,31 @@ def command_interactive(filename: str = None) -> None:
                 "Generate all TOTP codes": "generate-all",
                 "Info about a Service": "see-info",
                 "Settings": "settings",
-            }
+            },
+            disabled=(
+                {
+                    # you may only change settings if loading services failed
+                    "generate-one": "Disabled when services failed to load",
+                    "generate-all": "Disabled when services failed to load",
+                    "see-info": "Disabled when services failed to load",
+                }
+                if services is None
+                else {}
+            ),
         ),
         use_shortcuts=True,
         style=generate_custom_style(),
     ).ask():
         case "generate-one":
             # query list of items
+            assert services, "If services is None, this selection branch should be disabled in `generate_choices`."
             return generate_one_otp(services)
         case "generate-all":
             # show all
+            assert services, "If services is None, this selection branch should be disabled in `generate_choices`."
             return generate_all_totp(services)
         case "see-info":
+            assert services, "If services is None, this selection branch should be disabled in `generate_choices`."
             return show_service_info_interactive(services)
         case "settings":
             return command_settings(filename)
@@ -177,7 +192,7 @@ def default_2fas_file() -> str:
     return expand_path(filename)
 
 
-def default_2fas_services() -> TwoFactorDetailStorage:
+def default_2fas_services() -> TwoFactorDetailStorage | None:
     """
     Load the 2fas services from the active default file.
     """
@@ -194,7 +209,10 @@ def command_generate(filename: str | None, other_args: list[str]) -> None:
         filename: path to the active .2fas file
         other_args: list of services to generate codes for. If empty, an interactive menu will be shown.
     """
-    storage = prepare_to_generate(filename)
+    if not (storage := prepare_to_generate(filename)):
+        # nothing to do
+        return
+
     found: list[TwoFactorAuthDetails] = []
 
     if not other_args:
@@ -476,13 +494,13 @@ def main(
     elif remove and file_args:
         settings.remove_file(file_args[0])
     elif remove:
-        command_manage_files()
+        command_manage_files(filename)
     elif info:
-        services = prepare_to_generate(filename)
-        show_service_info(services, about=info)
+        if services := prepare_to_generate(filename):
+            show_service_info(services, about=info)
     elif generate_all:
-        services = prepare_to_generate(filename)
-        generate_all_totp(services)
+        if services := prepare_to_generate(filename):
+            generate_all_totp(services)
     elif args:
         command_generate(filename, other_args)
     else:

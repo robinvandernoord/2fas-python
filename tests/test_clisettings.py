@@ -5,7 +5,7 @@ import pytest
 from configuraptor import Singleton
 from configuraptor.errors import ConfigErrorExtraKey
 
-from src.twofas.cli_settings import get_cli_setting, load_cli_settings, set_cli_setting
+from src.twofas.cli_settings import get_cli_setting, load_cli_settings, set_cli_setting, expand_path
 
 
 @pytest.fixture()
@@ -56,20 +56,42 @@ def test_overwrite_empty(empty_temp_config):
     settings.add_file("", empty_temp_config)  # may NOT be written!
     settings.add_file(None, empty_temp_config)  # may NOT be written!
 
-    assert "3" in settings.files
+    abs_files = settings.files
+    assert any(
+        _.endswith("3")
+        for _
+        in settings.files
+    )
 
     reloaded_settings = load_cli_settings(empty_temp_config)
-    assert reloaded_settings.files == ["1", "2", "3"]
+    assert [
+               _[-1]
+               for _
+               in reloaded_settings.files
+           ] == ["1", "2", "3"]
 
 
 def test_remove_file(empty_temp_config):
     settings = load_cli_settings(empty_temp_config, files=["1", "2"], default_file="1")
 
-    assert "1" in settings.files
-    assert settings.default_file == "1"
+    assert any(
+        _.endswith("1")
+        for _
+        in settings.files
+    )
+    assert settings.default_file.endswith("1")
     settings.remove_file("1", empty_temp_config)
-    assert "1" not in settings.files
-    assert settings.default_file != "1"
+
+    print(settings.files, [_.endswith("1")
+                           for _
+                           in settings.files])
+
+    assert not any(
+        _.endswith("1")
+        for _
+        in settings.files
+    )
+    assert not settings.default_file.endswith("1")
 
 
 def test_filled(filled_temp_config):
@@ -87,9 +109,9 @@ def test_overwrite_filled(filled_temp_config):
 
 def test_get_setting(filled_temp_config):
     assert (
-        get_cli_setting("default_file", filled_temp_config)
-        == get_cli_setting("default-file", filled_temp_config)
-        == "a"
+            get_cli_setting("default_file", filled_temp_config)
+            == get_cli_setting("default-file", filled_temp_config)
+            == "a"
     )
 
     with pytest.raises(AttributeError):
@@ -103,3 +125,9 @@ def test_set_setting(filled_temp_config):
 
     with pytest.raises(ConfigErrorExtraKey):
         set_cli_setting("nothing", "else matters")
+
+
+def test_expand_path():
+    assert expand_path(None) == ""
+    assert expand_path("") == ""
+    assert expand_path("local").startswith("/")

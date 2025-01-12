@@ -23,7 +23,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    "lib2fas>=0.1.7",
+    "lib2fas>=0.1.8",
     "configuraptor>=1.25",
     "typer[all]",
     "questionary",
@@ -149,8 +149,13 @@ ignore = [
 # bandit -c pyproject.toml -r .
 exclude_dirs = [".bak", "venv"]
 skips = [
-    "B108"  # hard coded /tmp/... files are fine for me tbh
+    "B101", # Use of assert detected.
+    "B105", # hardcoded_password_string
+    "B106", # hardcoded_password_funcarg
+    "B108",  # hard coded /tmp/... files are fine for me tbh
 ]
+
+
 
 [tool.isort]
 profile = "black"

@@ -100,14 +100,17 @@ def generate_custom_style(
     )
 
 
-def generate_choices(choices: dict[str, str], with_exit: bool = True) -> list[questionary.Choice]:
+def generate_choices(
+    choices: dict[str, str], with_exit: bool = True, disabled: dict[str, str] = {}
+) -> list[questionary.Choice]:
     """
     Turn a dict of label -> value items into a list of Choices with an automatic shortcut key (1 - 9).
 
     If with_exit is True, an option with shortcut key 0 will be added to quit the program.
     """
     result = [
-        questionary.Choice(key, value, shortcut_key=str(idx)) for idx, (key, value) in enumerate(choices.items(), 1)
+        questionary.Choice(key, value, disabled=disabled.get(value), shortcut_key=str(idx))
+        for idx, (key, value) in enumerate(choices.items(), 1)
     ]
 
     if with_exit:
