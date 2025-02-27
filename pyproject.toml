@@ -23,7 +23,7 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    "lib2fas>=0.1.8",
+    "lib2fas>=0.1.9",
     "configuraptor>=1.25",
     "typer[all]",
     "questionary",
