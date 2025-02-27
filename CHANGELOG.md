@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v1.0.5 (2025-02-27)
+
+### Fix
+
+* Bump lib2fas dependency to 0.1.9 ([`5a4a5ab`](https://github.com/robinvandernoord/2fas-python/commit/5a4a5ab5cd9f7a0062fe799a52839c89f3709bad))
+
 ## v1.0.4 (2025-01-12)
 
 ### Fix
