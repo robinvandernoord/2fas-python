@@ -2,6 +2,16 @@
 
 <!--next-version-placeholder-->
 
+## v1.1.0 (2025-05-23)
+
+### Feature
+
+* Allow passing `-1` up to `-4` to bypass first interactive menu ([`4910e90`](https://github.com/robinvandernoord/2fas-python/commit/4910e90025bf65fdd2ff9434265dca29e21ddbcf))
+
+### Fix
+
+* **load_cli_settings:** Prevent configuraptor FailedToLoad ([`01e12aa`](https://github.com/robinvandernoord/2fas-python/commit/01e12aac2d63aada754efab128e6d092be698f93))
+
 ## v1.0.5 (2025-02-27)
 
 ### Fix
