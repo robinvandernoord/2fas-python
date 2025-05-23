@@ -87,7 +87,7 @@ def load_cli_settings(input_file: str | Path = DEFAULT_SETTINGS, **overwrite: An
     """
     Load the config file into a CliSettings instance.
     """
-    return CliSettings.load([input_file, overwrite], key=CONFIG_KEY)
+    return CliSettings.load([input_file, overwrite], strict=False, key=CONFIG_KEY)
 
 
 def get_cli_setting(key: str, filename: str | Path = DEFAULT_SETTINGS) -> typing.Any:
