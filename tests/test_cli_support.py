@@ -1,6 +1,6 @@
 import pytest
 
-from src.twofas.cli_support import state, generate_custom_style, generate_choices
+from src.twofas.cli_support import generate_choices, generate_custom_style, state
 
 
 def test_state():

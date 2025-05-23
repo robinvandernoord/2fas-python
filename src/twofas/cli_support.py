@@ -44,7 +44,7 @@ def clear(fn: None = None) -> typing.Callable[[typing.Callable[P, R]], typing.Ca
 
 
 def clear(
-    fn: typing.Callable[P, R] | None = None
+    fn: typing.Callable[P, R] | None = None,
 ) -> typing.Callable[P, R] | typing.Callable[[typing.Callable[P, R]], typing.Callable[P, R]]:  # pragma: no cover
     """
     Clear the screen before executing a function.

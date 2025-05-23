@@ -451,26 +451,10 @@ def main(
         "You can use `auto-verbose` in settings to always show more info.",
     ),
     # menu items:
-    step_one: bool = typer.Option(
-        False,
-        "-1",
-        help="Menu Option 1: Generate a TOTP code"
-    ),
-    step_two: bool = typer.Option(
-        False,
-        "-2",
-        help="Menu Option 2: Generate all TOTP codes"
-    ),
-    step_three: bool = typer.Option(
-        False,
-        "-3",
-        help="Menu Option 3: Show service info"
-    ),
-    step_four: bool = typer.Option(
-        False,
-        "-4",
-        help="Menu Option 4: Modify settings"
-    )
+    step_one: bool = typer.Option(False, "-1", help="Menu Option 1: Generate a TOTP code"),
+    step_two: bool = typer.Option(False, "-2", help="Menu Option 2: Generate all TOTP codes"),
+    step_three: bool = typer.Option(False, "-3", help="Menu Option 3: Show service info"),
+    step_four: bool = typer.Option(False, "-4", help="Menu Option 4: Modify settings"),
 ) -> None:  # pragma: no cover
     """
     You can use this command in multiple ways.
