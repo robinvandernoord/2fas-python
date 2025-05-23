@@ -450,6 +450,27 @@ def main(
         help="Show more details (e.g. the username for a TOTP service). "
         "You can use `auto-verbose` in settings to always show more info.",
     ),
+    # menu items:
+    step_one: bool = typer.Option(
+        False,
+        "-1",
+        help="Menu Option 1: Generate a TOTP code"
+    ),
+    step_two: bool = typer.Option(
+        False,
+        "-2",
+        help="Menu Option 2: Generate all TOTP codes"
+    ),
+    step_three: bool = typer.Option(
+        False,
+        "-3",
+        help="Menu Option 3: Show service info"
+    ),
+    step_four: bool = typer.Option(
+        False,
+        "-4",
+        help="Menu Option 4: Modify settings"
+    )
 ) -> None:  # pragma: no cover
     """
     You can use this command in multiple ways.
@@ -465,6 +486,9 @@ def main(
     2fas --setting key value
 
     2fas --setting key=value
+
+    Skip the interactive menu:
+    2fas -1 (or -2, -3, -4)
     """
     # stateless actions:
     if version:
@@ -489,6 +513,21 @@ def main(
 
     other_args = [_ for _ in args if not _.endswith(".2fas")]
 
+    # if -1, -2, -3 or -4 is passed, skip the interactive menu and go to that function:
+    if any((step_one, step_two, step_three, step_four)):
+        if not (services := prepare_to_generate(filename)):
+            print("Can not shortcut menu it there are no services.", file=sys.stderr)
+            return None
+        if step_one:
+            generate_one_otp(services)
+        if step_two:
+            generate_all_totp(services)
+        if step_three:
+            show_service_info_interactive(services)
+        if step_four:
+            command_settings(filename)
+        return None
+
     if setting:
         command_setting(args)
     elif remove and file_args:
@@ -505,3 +544,5 @@ def main(
         command_generate(filename, other_args)
     else:
         command_interactive(filename)
+
+    return None
