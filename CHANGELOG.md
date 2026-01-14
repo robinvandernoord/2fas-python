@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v1.1.1 (2026-01-14)
+
+### Documentation
+
+* Mark support for newer python versions ([`0e10b27`](https://github.com/robinvandernoord/2fas-python/commit/0e10b27ed997e075fd8ba932825fa0638700f062))
+
 ## v1.1.0 (2025-05-23)
 
 ### Feature
