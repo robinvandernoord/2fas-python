@@ -27,6 +27,7 @@ from .cli_support import (
     exit_with_clear,
     generate_choices,
     generate_custom_style,
+    menu,
     state,
 )
 from . import install
@@ -158,9 +159,8 @@ def show_service_info_interactive(services: TwoFactorDetailStorage) -> None:
     The raw JSON info for a service as stored in the .2fas file will be printed out.
     """
     about: str
-    while about := ask(
-        questionary.select("About which service?", choices=services.keys(), style=generate_custom_style())
-    ):
+    names = services.keys()  # a TwoFactorStorage method, not a dict view
+    while about := menu("About which service?", generate_choices({_: _ for _ in names}, with_exit=False)):
         show_service_info(services, about)
         if questionary.press_any_key_to_continue("Press 'Enter' to continue; Other keys to exit").ask() is None:
             exit_with_clear(0)
@@ -178,30 +178,26 @@ def command_interactive(filename: str = None) -> None:
     if services := prepare_to_generate(filename):
         rich.print(f"Active file: [blue]{filename}[/blue]")
 
-    match ask(
-        questionary.select(
-            "What do you want to do?",
-            choices=generate_choices(
+    match menu(
+        "What do you want to do?",
+        generate_choices(
+            {
+                "Generate a TOTP code": "generate-one",
+                "Generate all TOTP codes": "generate-all",
+                "Info about a Service": "see-info",
+                "Settings": "settings",
+            },
+            disabled=(
                 {
-                    "Generate a TOTP code": "generate-one",
-                    "Generate all TOTP codes": "generate-all",
-                    "Info about a Service": "see-info",
-                    "Settings": "settings",
-                },
-                disabled=(
-                    {
-                        # you may only change settings if loading services failed
-                        "generate-one": "Disabled when services failed to load",
-                        "generate-all": "Disabled when services failed to load",
-                        "see-info": "Disabled when services failed to load",
-                    }
-                    if services is None
-                    else {}
-                ),
+                    # you may only change settings if loading services failed
+                    "generate-one": "Disabled when services failed to load",
+                    "generate-all": "Disabled when services failed to load",
+                    "see-info": "Disabled when services failed to load",
+                }
+                if services is None
+                else {}
             ),
-            use_shortcuts=True,
-            style=generate_custom_style(),
-        )
+        ),
     ):
         case "generate-one":
             # query list of items
@@ -539,15 +535,8 @@ def set_default_file_interactive(filename: str) -> None:
     """
     Interactive menu (after Settings) to set the default 2fas file.
     """
-    new_filename = ask(
-        questionary.select(
-            "Pick a file:",
-            choices=state.settings.files or [],
-            default=filename,
-            style=generate_custom_style(),
-            use_shortcuts=True,
-        )
-    )
+    files = state.settings.files or []
+    new_filename = menu("Pick a file:", generate_choices({_: _ for _ in files}, with_exit=False), current=filename)
 
     if new_filename is None:
         return command_settings(filename)
@@ -588,21 +577,15 @@ def toggle_autoverbose(filename: str) -> None:
     color = "green" if settings.auto_verbose else "red"
     rich.print(f"[blue]Auto Verbose enabled:[/blue] [{color}]{is_enabled}[/{color}]")
 
-    text_enabled = "Enable"
-    new_value = (
-        ask(
-            questionary.select(
-                "Use Auto Verbose?",
-                choices=[
-                    text_enabled,
-                    "Disable",
-                ],
-                style=generate_custom_style(),
-            )
-        )
-        == text_enabled
+    chosen = menu(
+        "Use Auto Verbose?",
+        generate_choices({"Enable": True, "Disable": False}, with_exit=False),
+        current=settings.auto_verbose,
     )
+    if chosen is None:
+        return command_settings(filename)
 
+    new_value = bool(chosen)
     settings.auto_verbose = new_value
     state.verbose = new_value
     set_cli_setting("auto_verbose", new_value)
@@ -627,19 +610,14 @@ def choose_unlock_method(filename: str) -> None:
         "keeps working and you can not lock yourself out."
     )
 
-    chosen = ask(
-        questionary.select(
-            "How do you want to unlock your vault?",
-            choices=generate_choices(
-                {f"{label}{' (current)' if value == current else ''}": value for value, label in METHOD_LABELS.items()},
-                with_exit=False,
-                disabled=({} if is_set_up else {"security-key": "Set up a security key for this file first"}),
-            ),
-            use_shortcuts=True,
-            # start on (and highlight) whatever is configured now:
-            default=current,
-            style=generate_custom_style(),
-        )
+    chosen = menu(
+        "How do you want to unlock your vault?",
+        generate_choices(
+            {f"{label}{' (current)' if value == current else ''}": value for value, label in METHOD_LABELS.items()},
+            with_exit=False,
+            disabled=({} if is_set_up else {"security-key": "Set up a security key for this file first"}),
+        ),
+        current=current,
     )
 
     if (method := parse_method(chosen, current)) != current:
@@ -676,18 +654,16 @@ def choose_unlock_policy(filename: str, method: UnlockMethod) -> None:
 
     rich.print(f"[blue]{setting}:[/blue] {current} ({POLICY_HELP[current]})")
 
-    # Choice(title, value): questionary hands back the value, so nothing has to map a
-    # display string back to a setting. Indexing a dict with whatever came out of the
-    # prompt is how this screen used to crash with KeyError.
-    chosen = ask(
-        questionary.select(
-            "How often should 2fas ask?",
-            choices=[
-                questionary.Choice(f"{policy}: {cost}{' (current)' if policy == current else ''}", policy)
-                for policy, cost in costs.items()
-            ],
-            style=generate_custom_style(),
-        )
+    # label -> value, so questionary hands back the value and nothing has to map a display
+    # string back to a setting. Indexing a dict with whatever came out of the prompt is how
+    # this screen used to crash with KeyError.
+    chosen = menu(
+        "How often should 2fas ask?",
+        generate_choices(
+            {f"{policy}: {cost}{' (current)' if policy == current else ''}": policy for policy, cost in costs.items()},
+            with_exit=False,
+        ),
+        current=current,
     )
 
     if (policy := parse_policy(chosen, current)) != current:
@@ -733,22 +709,18 @@ def command_security(filename: str) -> None:
     )
     needs_key = {} if is_set_up else {"touch-policy": "Set up a security key for this file first"}
 
-    action = ask(
-        questionary.select(
-            "What do you want to do?",
-            choices=generate_choices(
-                {
-                    setup_label: "setup-key",
-                    "Change unlock method (passphrase / security key)": "unlock-method",
-                    "How often to ask for my passphrase": "password-policy",
-                    "How often to touch my security key": "touch-policy",
-                    "Back": "back",
-                },
-                disabled=needs_key,
-            ),
-            use_shortcuts=True,
-            style=generate_custom_style(),
-        )
+    action = menu(
+        "What do you want to do?",
+        generate_choices(
+            {
+                setup_label: "setup-key",
+                "Change unlock method (passphrase / security key)": "unlock-method",
+                "How often to ask for my passphrase": "password-policy",
+                "How often to touch my security key": "touch-policy",
+                "Back": "back",
+            },
+            disabled=needs_key,
+        ),
     )
 
     match action:
@@ -761,7 +733,7 @@ def command_security(filename: str) -> None:
             return choose_unlock_policy(filename, "password")
         case "touch-policy":
             return choose_unlock_policy(filename, "security-key")
-        case "back":
+        case "back" | None:
             return command_settings(filename)
         case _:
             exit_with_clear(1)
@@ -775,23 +747,19 @@ def command_settings(filename: str) -> None:
     Menu that shows up when you've chosen 'Settings' from the interactive menu.
     """
     rich.print(f"Active file: [blue]{filename}[/blue]")
-    action = ask(
-        questionary.select(
-            "What do you want to do?",
-            choices=generate_choices(
-                {
-                    "Show current settings": "show-settings",
-                    "Set default file": "set-default-file",
-                    "Add file": "add-file",
-                    "Remove files": "remove-files",
-                    "Toggle auto-verbose": "auto-verbose",
-                    "Unlocking & security key": "security",
-                    "Back": "back",
-                }
-            ),
-            use_shortcuts=True,
-            style=generate_custom_style(),
-        )
+    action = menu(
+        "What do you want to do?",
+        generate_choices(
+            {
+                "Show current settings": "show-settings",
+                "Set default file": "set-default-file",
+                "Add file": "add-file",
+                "Remove files": "remove-files",
+                "Toggle auto-verbose": "auto-verbose",
+                "Unlocking & security key": "security",
+                "Back": "back",
+            }
+        ),
     )
 
     match action:
@@ -804,7 +772,7 @@ def command_settings(filename: str) -> None:
             return command_settings(filename)
         case "remove-files":
             return command_manage_files(filename)
-        case "back":
+        case "back" | None:
             return command_interactive(filename)
         case "auto-verbose":
             return toggle_autoverbose(filename)

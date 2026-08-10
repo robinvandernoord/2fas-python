@@ -112,7 +112,8 @@ vendor-specific.
 ```
 
 The same options live under **Settings > Unlocking & security key** in the interactive
-menu, grouped together because they only make sense in relation to each other. That screen
+menu, grouped together because they only make sense in relation to each other. In every
+menu, `Escape` goes back a step and `Ctrl-C` quits. That screen
 also reports what 2fas can see of your key - product, firmware, whether hmac-secret is
 supported, and on Linux whether udev is in the way - so there is no separate diagnostics
 command to remember.
