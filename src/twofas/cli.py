@@ -2,19 +2,23 @@
 This file contains the Typer CLI.
 """
 
+import getpass
 import os
 import sys
 import typing
+from pathlib import Path
 
 import questionary
 import rich
 import typer
-from lib2fas._security import keyring_manager
-from lib2fas._types import TwoFactorAuthDetails
-from lib2fas.core import TwoFactorStorage, load_services
+from lib2fas import TwoFactorAuthDetails, TwoFactorStorage, load_services
 
+from . import yubikey
 from .__about__ import __version__
 from .cli_settings import (
+    CONFIG_DIR,
+    DEFAULT_SETTINGS,
+    KEYS_DIR,
     expand_path,
     get_cli_setting,
     load_cli_settings,
@@ -27,19 +31,51 @@ from .cli_support import (
     generate_custom_style,
     state,
 )
+from .keystore import KeyStore, vault_id_for
+from .unlock import (
+    POLICY_HELP,
+    PolicyUnlocker,
+    UnlockMethod,
+    UnlockPolicy,
+    enroll,
+    parse_method,
+    parse_policy,
+    prune_keystore,
+    vault_salt,
+)
 
 app = typer.Typer()
 
 TwoFactorDetailStorage: typing.TypeAlias = TwoFactorStorage[TwoFactorAuthDetails]
 
+_unlocker: PolicyUnlocker | None = None
+
+
+def get_unlocker(force_password: bool = False) -> PolicyUnlocker:
+    """
+    The unlocker for this invocation, built once from the user's settings.
+
+    It is a single instance on purpose: it remembers which path actually unlocked the
+    vault, which is what the per-code policy follows.
+    """
+    global _unlocker  # one unlocker per invocation, by design
+
+    if _unlocker is None:
+        _unlocker = PolicyUnlocker.from_settings(state.settings, force_password=force_password)
+
+    return _unlocker
+
 
 def prepare_to_generate(filename: str = None) -> TwoFactorDetailStorage | None:
     """
-    Clear old keyring entries (from previous sessions) and decrypt the selected 2fas file.
+    Clear stale unlock state (from previous sessions) and decrypt the selected 2fas file.
     """
-    keyring_manager.cleanup_keyring()
+    unlocker = get_unlocker()
+    unlocker.cleanup()
+    prune_keystore(unlocker.store, state.settings.files or [])
+
     filepath = filename or default_2fas_file()
-    if not (services := load_services(filepath)):
+    if not (services := load_services(filepath, unlocker=unlocker)):
         rich.print(f"[red]Error: {filepath} does not exit![/red]")
     return services
 
@@ -58,10 +94,25 @@ def print_for_service(service: TwoFactorAuthDetails) -> None:
         rich.print(f"- {service_name}: {code}")
 
 
+def confirm_presence() -> bool:
+    """
+    Run the per-code check, if the active unlock policy asks for one.
+
+    Called once per user-visible action rather than once per printed line: under `--all`
+    that is one check for the whole batch, and in the interactive menu it is one check per
+    service you pick. Otherwise the `code` policy would mean a touch per service in your
+    vault, which nobody wants.
+    """
+    return get_unlocker().confirm()
+
+
 def generate_all_totp(services: TwoFactorDetailStorage) -> None:
     """
     Generate TOTP codes for all services.
     """
+    if not confirm_presence():
+        return
+
     for service in services:
         print_for_service(service)
 
@@ -74,6 +125,9 @@ def generate_one_otp(services: TwoFactorDetailStorage) -> None:
     while service_name := questionary.autocomplete(
         "Choose a service", choices=services.keys(), style=generate_custom_style()
     ).ask():
+        if not confirm_presence():
+            continue
+
         for service in services.find(service_name):
             print_for_service(service)
 
@@ -83,6 +137,10 @@ def show_service_info(services: TwoFactorDetailStorage, about: str) -> None:
     """
     `--info <service>` to show the raw JSON info for a service as stored in the .2fas file.
     """
+    # this prints the raw entry, secret included, so it gets the same gate as a code:
+    if not confirm_presence():
+        return
+
     rich.print(services[about])
 
 
@@ -222,8 +280,174 @@ def command_generate(filename: str | None, other_args: list[str]) -> None:
     for query in other_args:
         found.extend(storage.find(query))
 
+    if not confirm_presence():
+        return
+
     for twofa in found:
         print_for_service(twofa)
+
+
+def command_enroll(filename: str) -> None:
+    """
+    `--enroll` to let your security key unlock the active vault from now on.
+
+    Unlocks with your passphrase first, because that is the only way to get the key that
+    gets wrapped. Your .2fas file is not touched, re-encrypted, or rewritten in any way;
+    all this adds is an encrypted copy of the vault key in ~/.config/2fas/keys.
+    """
+    if not yubikey.fido2_available():
+        rich.print("[red]YubiKey support needs an extra package: pip install '2fas[yubikey]'[/red]")
+        return
+
+    # look at the hardware before asking for a passphrase, so a key that is not plugged
+    # in costs the user nothing.
+    try:
+        authenticators = yubikey.describe_authenticators()
+    except yubikey.YubiKeyError as e:
+        rich.print(f"[red]{e}[/red]")
+        rich.print("Run `2fas --doctor` to see what is wrong.")
+        return
+
+    if not any(_.supports_hmac_secret for _ in authenticators):
+        rich.print("[red]No security key that supports hmac-secret is connected.[/red]")
+        rich.print("Run `2fas --doctor` to see what is wrong.")
+        return
+
+    # enrolling wraps the key the *passphrase* produces, so the security key path is
+    # skipped here even when it would have worked.
+    unlocker = get_unlocker()
+    unlocker.force_password = True
+
+    if not prepare_to_generate(filename):
+        return
+
+    vault = unlocker.vault()
+    if vault is None or unlocker.current_key is None:  # pragma: no cover
+        rich.print("[red]Nothing to enroll: this file is not encrypted.[/red]")
+        return
+
+    active_file, salt, _ = vault
+
+    pin = None
+    if any(_.has_pin for _ in authenticators):
+        # CTAP2 requires the PIN to *create* a credential whenever one is set,
+        # even though the unlocks afterwards will only need a touch.
+        rich.print("[blue]Your security key has a PIN, which CTAP2 requires to register a new credential.[/blue]")
+        rich.print("[blue]You will not need it again for day-to-day unlocking.[/blue]")
+        pin = getpass.getpass("Security key PIN? ") or None
+
+    try:
+        enroll(active_file, salt, unlocker.current_key, pin=pin)
+    except yubikey.YubiKeyError as e:
+        rich.print(f"[red]Enrolment failed: {e}[/red]")
+        return
+
+    set_cli_setting("unlock-method", "yubikey")
+    rich.print(f"[green]Enrolled a security key for {active_file}.[/green]")
+    rich.print(
+        f"Unlock method is now [blue]yubikey[/blue] "
+        f"([blue]{POLICY_HELP[parse_policy(get_cli_setting('yubikey-unlock-policy'), 'process')]}[/blue]). "
+        "Your passphrase keeps working, and `2fas --password` skips the key for one run."
+    )
+
+
+def command_forget_key(filename: str) -> None:
+    """
+    `--forget-key` to remove the security key enrolment for the active vault.
+
+    Only removes our stored blob. Nothing was ever written to the key itself, so there is
+    nothing to clean up there.
+    """
+    if not (salt := vault_salt(filename)):
+        rich.print(f"[red]Could not read a salt from {filename}; is it an encrypted .2fas file?[/red]")
+        return
+
+    if KeyStore().delete(vault_id_for(salt)):
+        rich.print(f"[green]Removed the security key enrolment for {filename}.[/green]")
+    else:
+        rich.print(f"[yellow]No security key was enrolled for {filename}.[/yellow]")
+
+    if parse_method(get_cli_setting("unlock-method")) == "yubikey":
+        set_cli_setting("unlock-method", "password")
+        rich.print("Unlock method set back to [blue]password[/blue].")
+
+
+def _hidraw_diagnosis() -> str:
+    """
+    Explain why no authenticator was visible, on Linux where that is usually udev.
+    """
+    if not sys.platform.startswith("linux"):
+        return "no FIDO2 device found"
+
+    nodes = sorted(Path("/dev").glob("hidraw*"))
+    if not nodes:
+        return "no /dev/hidraw* nodes at all - is your key actually plugged in?"
+
+    unreadable = [str(_) for _ in nodes if not os.access(_, os.R_OK | os.W_OK)]
+    if unreadable:
+        return (
+            f"{len(unreadable)} of {len(nodes)} /dev/hidraw* nodes are not readable/writable by you "
+            "- this is the usual cause. Install the udev rules that ship with libfido2 "
+            "(70-u2f.rules) and re-plug the key."
+        )
+
+    return f"{len(nodes)} /dev/hidraw* nodes are accessible, but none of them answered as a FIDO2 authenticator"
+
+
+def command_doctor(filename: str) -> None:
+    """
+    `--doctor` to check whether security key unlocking can work on this machine.
+
+    Everything here is read-only and needs no touch, so it is safe to run any time.
+    """
+    rich.print("[bold]2fas doctor[/bold]\n")
+
+    settings = state.settings
+    rich.print("[bold]Configuration[/bold]")
+    rich.print(f"- config directory: {CONFIG_DIR}")
+    rich.print(f"- settings file: {DEFAULT_SETTINGS}")
+    rich.print(f"- wrapped keys: {KEYS_DIR}")
+    method = parse_method(settings.unlock_method)
+    password_policy = parse_policy(settings.password_unlock_policy, "os-session")
+    yubikey_policy = parse_policy(settings.yubikey_unlock_policy, "process")
+    rich.print(f"- unlock-method: [blue]{method}[/blue]")
+    rich.print(f"- password-unlock-policy: [blue]{password_policy}[/blue] ({POLICY_HELP[password_policy]})")
+    rich.print(f"- yubikey-unlock-policy: [blue]{yubikey_policy}[/blue] ({POLICY_HELP[yubikey_policy]})")
+
+    rich.print("\n[bold]Security key[/bold]")
+    if not yubikey.fido2_available():
+        rich.print("- [yellow]fido2 not installed[/yellow] - `pip install '2fas[yubikey]'` to enable this")
+    else:
+        try:
+            authenticators = yubikey.describe_authenticators()
+        except yubikey.YubiKeyError as e:
+            authenticators = []
+            rich.print(f"- [red]{e}[/red]")
+
+        if not authenticators:
+            rich.print(f"- [yellow]{_hidraw_diagnosis()}[/yellow]")
+        for auth in authenticators:
+            rich.print(f"- {auth.product} (firmware {auth.firmware})")
+            hmac = "[green]yes[/green]" if auth.supports_hmac_secret else "[red]no[/red]"
+            rich.print(f"  - hmac-secret: {hmac}")
+            rich.print(f"  - PIN configured: {'yes' if auth.has_pin else 'no'} (only needed to enroll)")
+            if auth.always_uv:
+                rich.print(
+                    "  - [yellow]alwaysUv is enabled on this key. That forces user verification, "
+                    "which changes the hmac-secret output, so a key enrolled without it will stop "
+                    "unwrapping. Your passphrase still works; re-enroll to fix it.[/yellow]"
+                )
+
+    rich.print("\n[bold]Enrolled vaults[/bold]")
+    if not (enrolled := KeyStore().all()):
+        rich.print("- none yet (unlock with your passphrase, then run `2fas --enroll`)")
+    active_salt = vault_salt(filename)
+    active_id = vault_id_for(active_salt) if active_salt else None
+    for wrapped in enrolled:
+        marker = " [green](active file)[/green]" if wrapped.vault_id == active_id else ""
+        hint = wrapped.filename_hint or "unknown file"
+        exists = "" if Path(wrapped.filename_hint or "").exists() else " [yellow](file not found)[/yellow]"
+        rich.print(f"- {wrapped.vault_id[:12]}… {hint}{exists}{marker}")
 
 
 def get_setting(key: str) -> None:
@@ -325,6 +549,119 @@ def toggle_autoverbose(filename: str) -> None:
 
 
 @clear
+def choose_unlock_method(filename: str) -> None:
+    """
+    Interactive menu to switch between passphrase and security key unlocking.
+    """
+    current = parse_method(state.settings.unlock_method)
+    rich.print(f"[blue]Unlock method:[/blue] {current}")
+    rich.print(
+        "Your .2fas file stays passphrase-encrypted either way, so the passphrase always "
+        "keeps working and you can not lock yourself out."
+    )
+
+    labels: dict[str, UnlockMethod] = {
+        "Passphrase": "password",
+        "Security key (YubiKey), passphrase as fallback": "yubikey",
+    }
+    chosen = questionary.select(
+        "How do you want to unlock your vault?",
+        choices=list(labels),
+        default=next(label for label, value in labels.items() if value == current),
+        style=generate_custom_style(),
+    ).ask()
+
+    if chosen is not None:
+        set_cli_setting("unlock-method", labels[chosen])
+        state.settings.unlock_method = labels[chosen]
+
+    return command_settings(filename)
+
+
+@clear
+def choose_unlock_policy(filename: str, method: UnlockMethod) -> None:
+    """
+    Interactive menu for how often one of the two paths should ask for something.
+    """
+    setting = "yubikey-unlock-policy" if method == "yubikey" else "password-unlock-policy"
+    default: UnlockPolicy = "process" if method == "yubikey" else "os-session"
+    current = parse_policy(getattr(state.settings, setting.replace("-", "_")), default)
+
+    # what a tighter policy actually costs you differs enormously between the two paths:
+    # a touch is a second, a master passphrase is not.
+    costs: dict[UnlockPolicy, str] = (
+        {
+            "os-session": "one touch per boot",
+            "process": "one touch per run of 2fas (recommended)",
+            "code": "one touch for every code",
+        }
+        if method == "yubikey"
+        else {
+            "os-session": "type it once per boot (recommended)",
+            "process": "type it once per run of 2fas",
+            "code": "type it for every single code - realistically unusable",
+        }
+    )
+
+    rich.print(f"[blue]{setting}:[/blue] {current} ({POLICY_HELP[current]})")
+    labels = {f"{policy}: {cost}": policy for policy, cost in costs.items()}
+    chosen = questionary.select(
+        "How often should 2fas ask?",
+        choices=list(labels),
+        default=next(label for label, value in labels.items() if value == current),
+        style=generate_custom_style(),
+    ).ask()
+
+    if chosen is not None:
+        set_cli_setting(setting, labels[chosen])
+        setattr(state.settings, setting.replace("-", "_"), labels[chosen])
+
+    return command_settings(filename)
+
+
+@clear
+def command_security_key(filename: str) -> None:
+    """
+    Interactive menu (after Settings) for everything to do with a security key.
+    """
+    rich.print(f"Active file: [blue]{filename}[/blue]")
+
+    action = questionary.select(
+        "What do you want to do?",
+        choices=generate_choices(
+            {
+                "Check my setup (doctor)": "doctor",
+                "Enroll this security key for the active file": "enroll",
+                "Forget the enrolment for the active file": "forget",
+                "How often to touch the key": "policy",
+                "Back": "back",
+            }
+        ),
+        use_shortcuts=True,
+        style=generate_custom_style(),
+    ).ask()
+
+    match action:
+        case "doctor":
+            command_doctor(filename)
+            questionary.press_any_key_to_continue().ask()
+        case "enroll":
+            command_enroll(filename)
+            questionary.press_any_key_to_continue().ask()
+        case "forget":
+            command_forget_key(filename)
+            questionary.press_any_key_to_continue().ask()
+        case "policy":
+            return choose_unlock_policy(filename, "yubikey")
+        case "back":
+            return command_settings(filename)
+        case _:
+            exit_with_clear(1)
+
+    return command_settings(filename)
+
+
+@clear
 def command_settings(filename: str) -> None:
     """
     Menu that shows up when you've chosen 'Settings' from the interactive menu.
@@ -339,6 +676,9 @@ def command_settings(filename: str) -> None:
                 "Add file": "add-file",
                 "Remove files": "remove-files",
                 "Toggle auto-verbose": "auto-verbose",
+                "Unlock method": "unlock-method",
+                "How often to ask for my passphrase": "password-policy",
+                "Security key (YubiKey)": "security-key",
                 "Back": "back",
             }
         ),
@@ -360,6 +700,12 @@ def command_settings(filename: str) -> None:
             return command_interactive(filename)
         case "auto-verbose":
             return toggle_autoverbose(filename)
+        case "unlock-method":
+            return choose_unlock_method(filename)
+        case "password-policy":
+            return choose_unlock_policy(filename, "password")
+        case "security-key":
+            return command_security_key(filename)
         case _:
             exit_with_clear(1)
 
@@ -442,7 +788,26 @@ def main(
     remove: bool = typer.Option(
         False, "--remove", "--rm", "-r", help="`--remove <filename>` to remove a .2fas file from the known files"
     ),
+    doctor: bool = typer.Option(
+        False, "--doctor", help="Check whether unlocking with a security key can work on this machine."
+    ),
+    enroll_key: bool = typer.Option(
+        False,
+        "--enroll",
+        help="Let your security key unlock the active .2fas file. "
+        "Asks for your passphrase once and never modifies the .2fas file.",
+    ),
+    forget_key: bool = typer.Option(
+        False, "--forget-key", help="Remove the security key enrolment for the active .2fas file."
+    ),
     # flags:
+    password: bool = typer.Option(
+        False,
+        "--password",
+        "-p",
+        help="Skip the security key for this run and use your passphrase. "
+        "Always available; you can not lock yourself out.",
+    ),
     verbose: bool = typer.Option(
         False,
         "--verbose",
@@ -496,6 +861,16 @@ def main(
     settings.add_file(filename)
 
     other_args = [_ for _ in args if not _.endswith(".2fas")]
+
+    # build the unlocker before anything can decrypt, so `--password` is respected:
+    get_unlocker(force_password=password)
+
+    if doctor:
+        return command_doctor(filename)
+    elif enroll_key:
+        return command_enroll(filename)
+    elif forget_key:
+        return command_forget_key(filename)
 
     # if -1, -2, -3 or -4 is passed, skip the interactive menu and go to that function:
     if any((step_one, step_two, step_three, step_four)):

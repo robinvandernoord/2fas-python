@@ -2,6 +2,7 @@
 This file deals with managing settings for 2fas.
 """
 
+import sys
 import typing
 from pathlib import Path
 from typing import Any
@@ -11,11 +12,40 @@ from configuraptor import TypedConfig, asdict, beautify, singleton
 from configuraptor.core import convert_key
 
 config = Path("~/.config").expanduser()
-config.mkdir(exist_ok=True)
-DEFAULT_SETTINGS = config / "2fas.toml"
-DEFAULT_SETTINGS.touch(exist_ok=True)
+
+# 2fas used to be a single file (~/.config/2fas.toml), but it now also stores per-vault
+# blobs (wrapped keys), which do not belong in a settings file. Hence a directory.
+CONFIG_DIR = config / "2fas"
+LEGACY_SETTINGS = config / "2fas.toml"
+DEFAULT_SETTINGS = CONFIG_DIR / "2fas.toml"
+KEYS_DIR = CONFIG_DIR / "keys"
 
 CONFIG_KEY = "tool.2fas"
+
+
+def _migrate_legacy_settings() -> None:
+    """
+    Move ~/.config/2fas.toml into the new config directory, exactly once.
+
+    A move and not a copy: two files that both look authoritative is worse than one
+    move the user is told about.
+    """
+    if DEFAULT_SETTINGS.exists() or not LEGACY_SETTINGS.is_file():
+        return
+
+    try:
+        LEGACY_SETTINGS.replace(DEFAULT_SETTINGS)
+    except OSError as e:  # pragma: no cover
+        print(f"Could not move {LEGACY_SETTINGS} to {DEFAULT_SETTINGS}: {e}", file=sys.stderr)
+        return
+
+    print(f"Note: moved your 2fas settings from {LEGACY_SETTINGS} to {DEFAULT_SETTINGS}.", file=sys.stderr)
+
+
+config.mkdir(parents=True, exist_ok=True)
+CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+_migrate_legacy_settings()
+DEFAULT_SETTINGS.touch(exist_ok=True)
 
 
 def expand_path(file: str | Path | None) -> str:
@@ -38,12 +68,20 @@ def expand_paths(paths: typing.Iterable[str]) -> list[str]:
 @beautify
 class CliSettings(TypedConfig, singleton.Singleton):
     """
-    Class for the ~/.config/2fas.toml settings file.
+    Class for the ~/.config/2fas/2fas.toml settings file.
     """
 
     files: list[str] | None
     default_file: str | None
     auto_verbose: bool = False
+
+    # How your vault gets unlocked, and how often you are asked.
+    # These are plain strings and not enums on purpose: `set_cli_setting` runs values
+    # through configuraptor's type conversion, and a str annotation makes that a no-op.
+    # See twofas.unlock for the accepted values and the validation.
+    unlock_method: str = "password"
+    password_unlock_policy: str = "os-session"
+    yubikey_unlock_policy: str = "process"
 
     def add_file(self, filename: str | None, _config_file: str | Path = DEFAULT_SETTINGS) -> str | None:
         """

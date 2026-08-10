@@ -25,11 +25,13 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    "lib2fas>=0.1.9",
+    "lib2fas>=0.2.0",
     "configuraptor>=1.25",
     "typer[all]",
     "questionary",
     "typing-extensions",
+    "keyring",
+    "pyjson5",
 ]
 
 [template.plugins.default]
@@ -39,6 +41,11 @@ src-layout = true
 "twofas" = ["py.typed"]
 
 [project.optional-dependencies]
+# unlocking your vault with a security key (YubiKey); not required for normal use.
+yubikey = [
+    "fido2>=1.1",
+    "cryptography",
+]
 dev = [
     "hatch",
     "python-semantic-release<8",
