@@ -100,6 +100,33 @@ def generate_custom_style(
     )
 
 
+def ask(question: questionary.Question) -> typing.Any:
+    """
+    Run a questionary prompt where Escape backs out, the same as Ctrl-C.
+
+    questionary only binds Ctrl-C, which leaves Escape doing nothing in a menu - which is
+    exactly the key people reach for. The binding is deliberately *not* eager: arrow keys
+    arrive as escape sequences, so prompt_toolkit needs its moment to decide whether this
+    was a bare Escape or the start of one.
+
+    Returns:
+        whatever the prompt returned, or None if the user backed out.
+    """
+    from prompt_toolkit.key_binding import KeyBindings
+
+    def escape(event: typing.Any) -> None:
+        event.app.exit(result=None)
+
+    bindings = question.application.key_bindings
+    if isinstance(bindings, KeyBindings):
+        # not eager: arrow keys are escape sequences, so prompt_toolkit needs its moment
+        # to tell a bare Escape from the start of one.
+        add = typing.cast(typing.Callable[..., typing.Callable[[typing.Any], typing.Any]], bindings.add)
+        add("escape")(escape)
+
+    return question.ask()
+
+
 def generate_choices(
     choices: dict[str, str], with_exit: bool = True, disabled: dict[str, str] = {}
 ) -> list[questionary.Choice]:

@@ -13,7 +13,7 @@ import typer
 from lib2fas import TwoFactorAuthDetails, TwoFactorStorage, load_services
 from rich.markup import escape
 
-from . import yubikey
+from . import security_key
 from .__about__ import __version__
 from .cli_settings import (
     expand_path,
@@ -22,6 +22,7 @@ from .cli_settings import (
     set_cli_setting,
 )
 from .cli_support import (
+    ask,
     clear,
     exit_with_clear,
     generate_choices,
@@ -47,11 +48,11 @@ app = typer.Typer()
 
 TwoFactorDetailStorage: typing.TypeAlias = TwoFactorStorage[TwoFactorAuthDetails]
 
-# 'yubikey' is the setting value (and works for any FIDO2 key, not only YubiKeys);
+# 'security-key' is the setting value (and works for any FIDO2 key, not only YubiKeys);
 # "security key" is what it is called in the menus, where it needs to be self-explanatory.
 METHOD_LABELS: dict[UnlockMethod, str] = {
     "password": "Passphrase",
-    "yubikey": "Security key, with your passphrase as fallback",
+    "security-key": "Security key, with your passphrase as fallback",
 }
 
 _unlocker: PolicyUnlocker | None = None
@@ -157,9 +158,9 @@ def show_service_info_interactive(services: TwoFactorDetailStorage) -> None:
     The raw JSON info for a service as stored in the .2fas file will be printed out.
     """
     about: str
-    while about := questionary.select(
-        "About which service?", choices=services.keys(), style=generate_custom_style()
-    ).ask():
+    while about := ask(
+        questionary.select("About which service?", choices=services.keys(), style=generate_custom_style())
+    ):
         show_service_info(services, about)
         if questionary.press_any_key_to_continue("Press 'Enter' to continue; Other keys to exit").ask() is None:
             exit_with_clear(0)
@@ -177,29 +178,31 @@ def command_interactive(filename: str = None) -> None:
     if services := prepare_to_generate(filename):
         rich.print(f"Active file: [blue]{filename}[/blue]")
 
-    match questionary.select(
-        "What do you want to do?",
-        choices=generate_choices(
-            {
-                "Generate a TOTP code": "generate-one",
-                "Generate all TOTP codes": "generate-all",
-                "Info about a Service": "see-info",
-                "Settings": "settings",
-            },
-            disabled=(
+    match ask(
+        questionary.select(
+            "What do you want to do?",
+            choices=generate_choices(
                 {
-                    # you may only change settings if loading services failed
-                    "generate-one": "Disabled when services failed to load",
-                    "generate-all": "Disabled when services failed to load",
-                    "see-info": "Disabled when services failed to load",
-                }
-                if services is None
-                else {}
+                    "Generate a TOTP code": "generate-one",
+                    "Generate all TOTP codes": "generate-all",
+                    "Info about a Service": "see-info",
+                    "Settings": "settings",
+                },
+                disabled=(
+                    {
+                        # you may only change settings if loading services failed
+                        "generate-one": "Disabled when services failed to load",
+                        "generate-all": "Disabled when services failed to load",
+                        "see-info": "Disabled when services failed to load",
+                    }
+                    if services is None
+                    else {}
+                ),
             ),
-        ),
-        use_shortcuts=True,
-        style=generate_custom_style(),
-    ).ask():
+            use_shortcuts=True,
+            style=generate_custom_style(),
+        )
+    ):
         case "generate-one":
             # query list of items
             assert services, "If services is None, this selection branch should be disabled in `generate_choices`."
@@ -320,7 +323,7 @@ def ensure_fido2(interactive: bool = True) -> bool:
     environment is not something to do behind their back, so it always asks first, and
     outside a terminal it only prints the command.
     """
-    if yubikey.fido2_available():
+    if security_key.fido2_available():
         return True
 
     plan = detect_install_plan()
@@ -363,8 +366,8 @@ def command_enroll(filename: str) -> None:
     # look at the hardware before asking for a passphrase, so a key that is not plugged
     # in costs the user nothing.
     try:
-        authenticators = yubikey.describe_authenticators()
-    except yubikey.YubiKeyError as e:
+        authenticators = security_key.describe_authenticators()
+    except security_key.SecurityKeyError as e:
         rich.print(f"[red]{escape(str(e))}[/red]")
         print_security_key_status()
         return
@@ -393,23 +396,28 @@ def command_enroll(filename: str) -> None:
     if any(_.has_pin for _ in authenticators):
         # CTAP2 requires the PIN to *create* a credential whenever one is set,
         # even though the unlocks afterwards will only need a touch.
-        rich.print("[blue]Your security key has a PIN, which CTAP2 requires to register a new credential.[/blue]")
-        rich.print("[blue]You will not need it again for day-to-day unlocking.[/blue]")
+        rich.print(
+            "[blue]Your key has a PIN, which CTAP2 needs to register a credential. Not needed after this.[/blue]"
+        )
         # questionary rather than getpass, so the user gets * per character instead of a
         # dead-looking prompt.
-        pin = questionary.password("Security key PIN?", style=generate_custom_style()).ask() or None
+        pin = ask(questionary.password("Security key PIN?", style=generate_custom_style())) or None
+
+    # two touches, and it is worth saying so: one creates the credential, one reads the
+    # secret it derives. Every unlock afterwards is a single touch.
+    rich.print("[blue]Setup needs two touches; unlocking later needs one.[/blue]")
 
     try:
         enroll(active_file, salt, unlocker.current_key, pin=pin)
-    except yubikey.YubiKeyError as e:
+    except security_key.SecurityKeyError as e:
         rich.print(f"[red]Setup failed: {escape(str(e))}[/red]")
         return
 
-    set_cli_setting("unlock-method", "yubikey")
-    rich.print(f"[green]Enrolled a security key for {active_file}.[/green]")
+    set_cli_setting("unlock-method", "security-key")
+    rich.print(f"[green]Your security key can now unlock {active_file}.[/green]")
     rich.print(
-        f"Unlock method is now [blue]yubikey[/blue] "
-        f"([blue]{POLICY_HELP[parse_policy(get_cli_setting('yubikey-unlock-policy'), 'process')]}[/blue]). "
+        f"Unlock method is now [blue]security-key[/blue] "
+        f"([blue]{POLICY_HELP[parse_policy(get_cli_setting('security-key-unlock-policy'), 'process')]}[/blue]). "
         "Your passphrase keeps working, and `2fas --password` skips the key for one run."
     )
 
@@ -430,31 +438,29 @@ def command_forget_key(filename: str) -> None:
     else:
         rich.print(f"[yellow]No security key was enrolled for {filename}.[/yellow]")
 
-    if parse_method(get_cli_setting("unlock-method")) == "yubikey":
+    if parse_method(get_cli_setting("unlock-method")) == "security-key":
         set_cli_setting("unlock-method", "password")
         rich.print("Unlock method set back to [blue]password[/blue].")
 
 
 def _hidraw_diagnosis() -> str:
     """
-    Explain why no authenticator was visible, on Linux where that is usually udev.
+    Say in one clause why no authenticator was visible.
+
+    On Linux the answer is almost always udev, so that case names the fix; the others just
+    say what is true and leave it there.
     """
     if not sys.platform.startswith("linux"):
-        return "no FIDO2 device found"
+        return "none found"
 
     nodes = sorted(Path("/dev").glob("hidraw*"))
     if not nodes:
-        return "no /dev/hidraw* nodes at all - is your key actually plugged in?"
+        return "none plugged in"
 
-    unreadable = [str(_) for _ in nodes if not os.access(_, os.R_OK | os.W_OK)]
-    if unreadable:
-        return (
-            f"{len(unreadable)} of {len(nodes)} /dev/hidraw* nodes are not readable/writable by you "
-            "- this is the usual cause. Install the udev rules that ship with libfido2 "
-            "(70-u2f.rules) and re-plug the key."
-        )
+    if any(not os.access(_, os.R_OK | os.W_OK) for _ in nodes):
+        return "no access to /dev/hidraw* - install libfido2's udev rules, then re-plug"
 
-    return f"{len(nodes)} /dev/hidraw* nodes are accessible, but none of them answered as a FIDO2 authenticator"
+    return "nothing plugged in answered as a FIDO2 key"
 
 
 def print_security_key_status() -> None:
@@ -465,7 +471,7 @@ def print_security_key_status() -> None:
     anyone wants to know their firmware version or whether udev is in the way is the moment
     setting up or unlocking did not work.
     """
-    if not yubikey.fido2_available():
+    if not security_key.fido2_available():
         rich.print(
             "Connected key:  [yellow]unknown[/yellow] - the fido2 package is not installed "
             f"([bold]{escape(detect_install_plan().as_shell())}[/bold])"
@@ -473,8 +479,8 @@ def print_security_key_status() -> None:
         return
 
     try:
-        authenticators = yubikey.describe_authenticators()
-    except yubikey.YubiKeyError as e:
+        authenticators = security_key.describe_authenticators()
+    except security_key.SecurityKeyError as e:
         rich.print(f"Connected key:  [red]{escape(str(e))}[/red]")
         return
 
@@ -533,13 +539,15 @@ def set_default_file_interactive(filename: str) -> None:
     """
     Interactive menu (after Settings) to set the default 2fas file.
     """
-    new_filename = questionary.select(
-        "Pick a file:",
-        choices=state.settings.files or [],
-        default=filename,
-        style=generate_custom_style(),
-        use_shortcuts=True,
-    ).ask()
+    new_filename = ask(
+        questionary.select(
+            "Pick a file:",
+            choices=state.settings.files or [],
+            default=filename,
+            style=generate_custom_style(),
+            use_shortcuts=True,
+        )
+    )
 
     if new_filename is None:
         return command_settings(filename)
@@ -582,14 +590,16 @@ def toggle_autoverbose(filename: str) -> None:
 
     text_enabled = "Enable"
     new_value = (
-        questionary.select(
-            "Use Auto Verbose?",
-            choices=[
-                text_enabled,
-                "Disable",
-            ],
-            style=generate_custom_style(),
-        ).ask()
+        ask(
+            questionary.select(
+                "Use Auto Verbose?",
+                choices=[
+                    text_enabled,
+                    "Disable",
+                ],
+                style=generate_custom_style(),
+            )
+        )
         == text_enabled
     )
 
@@ -617,16 +627,20 @@ def choose_unlock_method(filename: str) -> None:
         "keeps working and you can not lock yourself out."
     )
 
-    chosen = questionary.select(
-        "How do you want to unlock your vault?",
-        choices=generate_choices(
-            {f"{label}{' (current)' if value == current else ''}": value for value, label in METHOD_LABELS.items()},
-            with_exit=False,
-            disabled=({} if is_set_up else {"yubikey": "Set up a security key for this file first"}),
-        ),
-        use_shortcuts=True,
-        style=generate_custom_style(),
-    ).ask()
+    chosen = ask(
+        questionary.select(
+            "How do you want to unlock your vault?",
+            choices=generate_choices(
+                {f"{label}{' (current)' if value == current else ''}": value for value, label in METHOD_LABELS.items()},
+                with_exit=False,
+                disabled=({} if is_set_up else {"security-key": "Set up a security key for this file first"}),
+            ),
+            use_shortcuts=True,
+            # start on (and highlight) whatever is configured now:
+            default=current,
+            style=generate_custom_style(),
+        )
+    )
 
     if (method := parse_method(chosen, current)) != current:
         set_cli_setting("unlock-method", method)
@@ -640,8 +654,8 @@ def choose_unlock_policy(filename: str, method: UnlockMethod) -> None:
     """
     Menu for how often one of the two paths should ask for something.
     """
-    setting = "yubikey-unlock-policy" if method == "yubikey" else "password-unlock-policy"
-    default: UnlockPolicy = "process" if method == "yubikey" else "os-session"
+    setting = "security-key-unlock-policy" if method == "security-key" else "password-unlock-policy"
+    default: UnlockPolicy = "process" if method == "security-key" else "os-session"
     current = parse_policy(getattr(state.settings, setting.replace("-", "_")), default)
 
     # what a tighter policy actually costs you differs enormously between the two paths:
@@ -652,7 +666,7 @@ def choose_unlock_policy(filename: str, method: UnlockMethod) -> None:
             "process": "one touch per run of 2fas (recommended)",
             "code": "one touch for every code",
         }
-        if method == "yubikey"
+        if method == "security-key"
         else {
             "os-session": "type it once per boot (recommended)",
             "process": "type it once per run of 2fas",
@@ -665,14 +679,16 @@ def choose_unlock_policy(filename: str, method: UnlockMethod) -> None:
     # Choice(title, value): questionary hands back the value, so nothing has to map a
     # display string back to a setting. Indexing a dict with whatever came out of the
     # prompt is how this screen used to crash with KeyError.
-    chosen = questionary.select(
-        "How often should 2fas ask?",
-        choices=[
-            questionary.Choice(f"{policy}: {cost}{' (current)' if policy == current else ''}", policy)
-            for policy, cost in costs.items()
-        ],
-        style=generate_custom_style(),
-    ).ask()
+    chosen = ask(
+        questionary.select(
+            "How often should 2fas ask?",
+            choices=[
+                questionary.Choice(f"{policy}: {cost}{' (current)' if policy == current else ''}", policy)
+                for policy, cost in costs.items()
+            ],
+            style=generate_custom_style(),
+        )
+    )
 
     if (policy := parse_policy(chosen, current)) != current:
         set_cli_setting(setting, policy)
@@ -698,7 +714,7 @@ def command_security(filename: str) -> None:
     is_set_up = is_security_key_set_up(filename)
 
     password_policy = parse_policy(state.settings.password_unlock_policy, "os-session")
-    yubikey_policy = parse_policy(state.settings.yubikey_unlock_policy, "process")
+    security_key_policy = parse_policy(state.settings.security_key_unlock_policy, "process")
 
     rich.print(f"Active file:    [blue]{filename}[/blue]")
     rich.print(f"Unlock method:  [blue]{METHOD_LABELS[method]}[/blue]")
@@ -706,30 +722,34 @@ def command_security(filename: str) -> None:
         rich.print("Security key:   [green]set up for this file[/green]")
     else:
         rich.print("Security key:   [yellow]not set up for this file[/yellow]")
-    rich.print(f"Asks you:       passphrase {POLICY_HELP[password_policy]}, touch {POLICY_HELP[yubikey_policy]}")
+    rich.print(f"Asks you:       passphrase {POLICY_HELP[password_policy]}, touch {POLICY_HELP[security_key_policy]}")
     print_security_key_status()
     rich.print("")
 
     setup_label = (
-        "Remove the security key for this file" if is_set_up else "Set up a security key for this file (YubiKey)"
+        "Remove the security key for this file"
+        if is_set_up
+        else "Set up a security key for this file (YubiKey, SoloKey, ...)"
     )
     needs_key = {} if is_set_up else {"touch-policy": "Set up a security key for this file first"}
 
-    action = questionary.select(
-        "What do you want to do?",
-        choices=generate_choices(
-            {
-                setup_label: "setup-key",
-                "Change unlock method (passphrase / security key)": "unlock-method",
-                "How often to ask for my passphrase": "password-policy",
-                "How often to touch my security key": "touch-policy",
-                "Back": "back",
-            },
-            disabled=needs_key,
-        ),
-        use_shortcuts=True,
-        style=generate_custom_style(),
-    ).ask()
+    action = ask(
+        questionary.select(
+            "What do you want to do?",
+            choices=generate_choices(
+                {
+                    setup_label: "setup-key",
+                    "Change unlock method (passphrase / security key)": "unlock-method",
+                    "How often to ask for my passphrase": "password-policy",
+                    "How often to touch my security key": "touch-policy",
+                    "Back": "back",
+                },
+                disabled=needs_key,
+            ),
+            use_shortcuts=True,
+            style=generate_custom_style(),
+        )
+    )
 
     match action:
         case "setup-key":
@@ -740,7 +760,7 @@ def command_security(filename: str) -> None:
         case "password-policy":
             return choose_unlock_policy(filename, "password")
         case "touch-policy":
-            return choose_unlock_policy(filename, "yubikey")
+            return choose_unlock_policy(filename, "security-key")
         case "back":
             return command_settings(filename)
         case _:
@@ -755,22 +775,24 @@ def command_settings(filename: str) -> None:
     Menu that shows up when you've chosen 'Settings' from the interactive menu.
     """
     rich.print(f"Active file: [blue]{filename}[/blue]")
-    action = questionary.select(
-        "What do you want to do?",
-        choices=generate_choices(
-            {
-                "Show current settings": "show-settings",
-                "Set default file": "set-default-file",
-                "Add file": "add-file",
-                "Remove files": "remove-files",
-                "Toggle auto-verbose": "auto-verbose",
-                "Unlocking & security key": "security",
-                "Back": "back",
-            }
-        ),
-        use_shortcuts=True,
-        style=generate_custom_style(),
-    ).ask()
+    action = ask(
+        questionary.select(
+            "What do you want to do?",
+            choices=generate_choices(
+                {
+                    "Show current settings": "show-settings",
+                    "Set default file": "set-default-file",
+                    "Add file": "add-file",
+                    "Remove files": "remove-files",
+                    "Toggle auto-verbose": "auto-verbose",
+                    "Unlocking & security key": "security",
+                    "Back": "back",
+                }
+            ),
+            use_shortcuts=True,
+            style=generate_custom_style(),
+        )
+    )
 
     match action:
         case "show-settings":
@@ -874,7 +896,7 @@ def main(
         False,
         "--setup-key",
         "--enroll",
-        help="Set up a security key (YubiKey) to unlock the active .2fas file. "
+        help="Set up a FIDO2 security key (YubiKey, SoloKey, ...) to unlock the active .2fas file. "
         "Asks for your passphrase once and never modifies the .2fas file.",
     ),
     forget_key: bool = typer.Option(

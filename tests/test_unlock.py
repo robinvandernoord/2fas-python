@@ -53,7 +53,7 @@ def typed(value: str) -> typing.Callable[[str], str]:
 
 
 def test_parse_method():
-    assert parse_method("yubikey") == "yubikey"
+    assert parse_method("security-key") == "security-key"
     assert parse_method("PASSWORD") == "password"
     assert parse_method(None) == "password"
     assert parse_method("nonsense") == "password"
@@ -87,7 +87,7 @@ def test_vault_id_is_path_independent(tmp_path, salt):
 
 
 def test_cached_key_roundtrip():
-    cached = CachedKey(b"0" * 32, "yubikey")
+    cached = CachedKey(b"0" * 32, "security-key")
     assert CachedKey.decode(cached.encode()) == cached
 
     assert CachedKey.decode("nonsense") is None
@@ -211,11 +211,11 @@ def test_wrong_passphrase_is_retried_and_not_remembered(monkeypatch, store, salt
     assert lib2fas.load_services(FILENAME, _max_retries=3, unlocker=unlocker)
 
 
-# --- the yubikey path, with the hardware faked out ---
+# --- the security key path, with the hardware faked out ---
 
 
-class FakeYubiKey:
-    """Stands in for src.twofas.yubikey, so the policy logic is testable without hardware."""
+class FakeSecurityKey:
+    """Stands in for src.twofas.security_key, so the policy logic is testable without hardware."""
 
     def __init__(self, secret: bytes = b"S" * 32, error: Exception = None) -> None:
         self.secret = secret
@@ -243,37 +243,37 @@ class FakeYubiKey:
 
     def unwrap_key(self, secret, vault_id, nonce, ciphertext):
         if secret != self.secret:
-            raise unlock_module.YubiKeyError("wrong key")
+            raise unlock_module.SecurityKeyError("wrong key")
         return bytes(a ^ b for a, b in zip(ciphertext, secret))
 
 
-def enrolled_store(store: KeyStore, salt: bytes, key: bytes, fake: FakeYubiKey) -> KeyStore:
+def enrolled_store(store: KeyStore, salt: bytes, key: bytes, fake: FakeSecurityKey) -> KeyStore:
     vault_id = vault_id_for(salt)
     nonce, ciphertext = fake.wrap_key(fake.secret, vault_id, key)
     store.put(new_wrapped_key(vault_id, b"cred", b"H" * 32, nonce, ciphertext, "2fas.local", FILENAME))
     return store
 
 
-def test_yubikey_path_unlocks_without_a_passphrase(monkeypatch, store, salt, key, no_session_cache):
-    fake = FakeYubiKey()
+def test_security_key_path_unlocks_without_a_passphrase(monkeypatch, store, salt, key, no_session_cache):
+    fake = FakeSecurityKey()
     enrolled_store(store, salt, key, fake)
 
     monkeypatch.setattr("getpass.getpass", typed("should not be asked"))
-    unlocker = PolicyUnlocker(method="yubikey", yubikey_policy="process", store=store)
-    unlocker._import_yubikey = lambda: fake
+    unlocker = PolicyUnlocker(method="security-key", security_key_policy="process", store=store)
+    unlocker._import_backend = lambda: fake
 
     assert unlocker.unlock(FILENAME, salt) == key
-    assert unlocker.used_path == "yubikey"
+    assert unlocker.used_path == "security-key"
     assert fake.touches == 1
 
 
 def test_falls_back_to_the_passphrase_when_the_key_is_missing(monkeypatch, store, salt, key, no_session_cache):
-    fake = FakeYubiKey(error=unlock_module.YubiKeyError("not plugged in"))
-    enrolled_store(store, salt, key, FakeYubiKey())
+    fake = FakeSecurityKey(error=unlock_module.SecurityKeyError("not plugged in"))
+    enrolled_store(store, salt, key, FakeSecurityKey())
 
     monkeypatch.setattr("getpass.getpass", typed(PASSWORD))
-    unlocker = PolicyUnlocker(method="yubikey", yubikey_policy="code", store=store)
-    unlocker._import_yubikey = lambda: fake
+    unlocker = PolicyUnlocker(method="security-key", security_key_policy="code", store=store)
+    unlocker._import_backend = lambda: fake
 
     assert unlocker.unlock(FILENAME, salt) == key
     # the policy must follow the path taken, not the method configured:
@@ -283,11 +283,11 @@ def test_falls_back_to_the_passphrase_when_the_key_is_missing(monkeypatch, store
 
 
 def test_no_enrolment_falls_back_without_touching_hardware(monkeypatch, store, salt, key, no_session_cache):
-    fake = FakeYubiKey()
+    fake = FakeSecurityKey()
     monkeypatch.setattr("getpass.getpass", typed(PASSWORD))
 
-    unlocker = PolicyUnlocker(method="yubikey", store=store)
-    unlocker._import_yubikey = lambda: fake
+    unlocker = PolicyUnlocker(method="security-key", store=store)
+    unlocker._import_backend = lambda: fake
 
     assert unlocker.unlock(FILENAME, salt) == key
     assert unlocker.used_path == "password"
@@ -295,12 +295,12 @@ def test_no_enrolment_falls_back_without_touching_hardware(monkeypatch, store, s
 
 
 def test_force_password_skips_the_key(monkeypatch, store, salt, key, no_session_cache):
-    fake = FakeYubiKey()
+    fake = FakeSecurityKey()
     enrolled_store(store, salt, key, fake)
     monkeypatch.setattr("getpass.getpass", typed(PASSWORD))
 
-    unlocker = PolicyUnlocker(method="yubikey", store=store, force_password=True)
-    unlocker._import_yubikey = lambda: fake
+    unlocker = PolicyUnlocker(method="security-key", store=store, force_password=True)
+    unlocker._import_backend = lambda: fake
 
     assert unlocker.unlock(FILENAME, salt) == key
     assert fake.touches == 0
@@ -327,11 +327,11 @@ def test_confirmation_is_skipped_under_looser_policies(monkeypatch, store, salt,
 
 
 def test_confirmation_touches_the_key_every_time(store, salt, key, no_session_cache):  # noqa: ARG001
-    fake = FakeYubiKey()
+    fake = FakeSecurityKey()
     enrolled_store(store, salt, key, fake)
 
-    unlocker = PolicyUnlocker(method="yubikey", yubikey_policy="code", store=store)
-    unlocker._import_yubikey = lambda: fake
+    unlocker = PolicyUnlocker(method="security-key", security_key_policy="code", store=store)
+    unlocker._import_backend = lambda: fake
     assert unlocker.unlock(FILENAME, salt) == key
 
     assert unlocker.confirm()
@@ -388,37 +388,37 @@ def test_process_policy_ignores_a_key_another_run_left_behind(monkeypatch, store
 def test_a_passphrase_cache_does_not_satisfy_the_security_key_method(monkeypatch, store, salt, key):
     # the bug: after setting up a key, a key cached by the earlier passphrase run kept
     # unlocking the vault, so switching the method looked like it did nothing at all.
-    fake = FakeYubiKey()
+    fake = FakeSecurityKey()
     enrolled_store(store, salt, key, fake)
     session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "password")})
 
-    unlocker = unlocker_with(store, salt, session, method="yubikey", yubikey_policy="os-session")
-    unlocker._import_yubikey = lambda: fake
+    unlocker = unlocker_with(store, salt, session, method="security-key", security_key_policy="os-session")
+    unlocker._import_backend = lambda: fake
 
     assert unlocker.unlock(FILENAME, salt) == key
-    assert unlocker.used_path == "yubikey"
+    assert unlocker.used_path == "security-key"
     assert fake.touches == 1
 
 
 def test_a_security_key_cache_is_reused_under_os_session(store, salt, key):
-    fake = FakeYubiKey()
+    fake = FakeSecurityKey()
     enrolled_store(store, salt, key, fake)
-    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "yubikey")})
+    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "security-key")})
 
-    unlocker = unlocker_with(store, salt, session, method="yubikey", yubikey_policy="os-session")
-    unlocker._import_yubikey = lambda: fake
+    unlocker = unlocker_with(store, salt, session, method="security-key", security_key_policy="os-session")
+    unlocker._import_backend = lambda: fake
 
     assert unlocker.unlock(FILENAME, salt) == key
     assert fake.touches == 0  # one touch per boot, and this boot already had one
 
 
 def test_security_key_touches_every_run_under_process(store, salt, key):
-    fake = FakeYubiKey()
+    fake = FakeSecurityKey()
     enrolled_store(store, salt, key, fake)
-    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "yubikey")})
+    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "security-key")})
 
-    unlocker = unlocker_with(store, salt, session, method="yubikey", yubikey_policy="process")
-    unlocker._import_yubikey = lambda: fake
+    unlocker = unlocker_with(store, salt, session, method="security-key", security_key_policy="process")
+    unlocker._import_backend = lambda: fake
 
     assert unlocker.unlock(FILENAME, salt) == key
     assert fake.touches == 1
@@ -430,11 +430,11 @@ def test_security_key_touches_every_run_under_process(store, salt, key):
 
 
 def test_unenrolled_vault_uses_the_passphrase_cache(monkeypatch, store, salt, key):
-    # method is yubikey, but this particular vault has no key set up: the passphrase is
+    # method is security-key, but this particular vault has no key set up: the passphrase is
     # what will be used, so its cache is the right one to consult.
     session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "password")})
     monkeypatch.setattr("getpass.getpass", typed("would fail if it were asked"))
 
-    unlocker = unlocker_with(store, salt, session, method="yubikey", password_policy="os-session")
+    unlocker = unlocker_with(store, salt, session, method="security-key", password_policy="os-session")
     assert unlocker.unlock(FILENAME, salt) == key
     assert unlocker.used_path == "password"

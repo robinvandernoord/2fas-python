@@ -1,7 +1,7 @@
 """
 This file works out how to add the optional `fido2` dependency to *this* installation.
 
-Telling someone to `pip install '2fas[yubikey]'` is unhelpful when they installed 2fas with
+Telling someone to `pip install '2fas[security-key]'` is unhelpful when they installed 2fas with
 pipx or as a uv tool: plain pip either fails or installs into the wrong environment. So we
 look at where we are actually running from and propose the command that fits, preferring uv
 where it is available.
@@ -15,7 +15,7 @@ import typing
 from pathlib import Path
 
 EXTRA_PACKAGE = "fido2"
-EXTRA_NAME = "2fas[yubikey]"
+EXTRA_NAME = "2fas[security-key]"
 
 
 class InstallPlan(typing.NamedTuple):

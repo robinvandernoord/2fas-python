@@ -22,7 +22,12 @@ from pathlib import Path
 
 from .cli_settings import KEYS_DIR
 
-CURRENT_VERSION = 1
+# Bump this whenever a stored blob stops being readable by the current code - including
+# when `security_key.HKDF_INFO_PREFIX` changes, since that silently changes the wrapping
+# key. An unreadable blob is rejected here and reads as "no security key set up", which
+# sends the user to `--setup-key`; without the bump they would get a confusing
+# "this key does not belong to that vault" instead.
+CURRENT_VERSION = 2
 
 
 def vault_id_for(salt: bytes) -> str:

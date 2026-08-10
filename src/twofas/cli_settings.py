@@ -81,7 +81,7 @@ class CliSettings(TypedConfig, singleton.Singleton):
     # See twofas.unlock for the accepted values and the validation.
     unlock_method: str = "password"
     password_unlock_policy: str = "os-session"
-    yubikey_unlock_policy: str = "process"
+    security_key_unlock_policy: str = "process"
 
     def add_file(self, filename: str | None, _config_file: str | Path = DEFAULT_SETTINGS) -> str | None:
         """

@@ -5,7 +5,7 @@ Standalone probe: can this machine + this security key do what 2fas needs?
 Run this before installing anything else:
 
     pip install fido2
-    python scripts/probe_yubikey.py
+    python scripts/probe_security_key.py
 
 It answers the two questions that decide whether the feature works for you:
 

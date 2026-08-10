@@ -22,3 +22,22 @@ def test_choices():
 
     c = generate_choices({"label": "value"}, with_exit=False)
     assert len(c) == 1
+
+
+def test_escape_backs_out_of_a_menu():
+    import questionary
+    from prompt_toolkit.input import create_pipe_input
+    from prompt_toolkit.output import DummyOutput
+
+    from src.twofas.cli_support import ask
+
+    choices = [questionary.Choice("first", "a"), questionary.Choice("second", "b")]
+
+    def run(keys: str):
+        with create_pipe_input() as pipe:
+            pipe.send_text(keys)
+            return ask(questionary.select("q?", choices=choices, default="b", input=pipe, output=DummyOutput()))
+
+    assert run("\r") == "b"  # default is where the cursor starts
+    assert run("\x1b") is None  # escape backs out
+    assert run("\x1b[A\r") == "a"  # ...without breaking arrow keys, which are escape sequences

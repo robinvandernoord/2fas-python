@@ -52,9 +52,9 @@ files = [
 default_file = "/some/path/to/file.2fas" # which file to use when no .2fas file was explicitly passed?
 auto_verbose = true # run every command as if --verbose was passed?
 
-unlock_method = "password" # or "yubikey"
+unlock_method = "password" # or "security-key"
 password_unlock_policy = "os-session" # how often to ask for your passphrase
-yubikey_unlock_policy = "process" # how often to ask for a touch
+security_key_unlock_policy = "process" # how often to ask for a touch
 
 ```
 
@@ -71,9 +71,9 @@ reads it.
 
 Two settings control unlocking, and they are separate on purpose.
 
-**`unlock-method`** is how you unlock: `password` (the default) or `yubikey`.
+**`unlock-method`** is how you unlock: `password` (the default) or `security-key`.
 
-**`password-unlock-policy`** and **`yubikey-unlock-policy`** are how often you are asked:
+**`password-unlock-policy`** and **`security-key-unlock-policy`** are how often you are asked:
 
 | policy       | passphrase path                     | security key path   |
 |--------------|-------------------------------------|---------------------|
@@ -98,7 +98,11 @@ your login keyring under a service name that is regenerated every boot; that is 
 forget-on-reboot mechanism, not an access-control one - while your login keyring is
 unlocked, any process running as you can read it.
 
-### Unlocking with a YubiKey
+### Unlocking with a security key
+
+Works with any FIDO2 authenticator that implements the `hmac-secret` extension - a YubiKey,
+SoloKey, Nitrokey, Token2, and most keys made since about 2018. Nothing here is
+vendor-specific.
 
 ```bash
 2fas --setup-key         # sets it up: offers to install what is missing, then two touches
@@ -137,7 +141,7 @@ passphrase-encrypted, which has two consequences worth being explicit about:
 - **you can not lock yourself out.** Lost key, dead key, forgotten to bring it - your
   passphrase always still works, and `--password` skips the key deliberately.
 - **your effective strength is the weaker of the two paths**, which is your passphrase.
-  Adding a YubiKey buys you convenience and protection of the *cache*, not a stronger vault.
+  Adding a security key buys you convenience and protection of the *cache*, not a stronger vault.
   If you want a stronger vault, use a stronger passphrase.
 
 Under the hood this uses the FIDO2 `hmac-secret` extension with a non-discoverable
@@ -147,6 +151,9 @@ needed for day-to-day use. Unplug the key and there is no trace of 2fas on it.
 
 Two things to know:
 
+- **Setup takes two touches, every unlock afterwards takes one.** The first touch creates
+  the credential, the second reads the secret it derives. (CTAP 2.2 can do both in one
+  step, but not every key supports it.)
 - **Setup needs your key's PIN if you have one set.** CTAP2 requires it to create a
   credential. Unlocking afterwards never does.
 - **Do not enable `alwaysUv` on your key after setting it up.** User verification changes the
@@ -157,7 +164,7 @@ Before installing anything, you can check whether your key and machine are up to
 
 ```bash
 pip install fido2
-python scripts/probe_yubikey.py
+python scripts/probe_security_key.py
 ```
 
 On Linux, the most common failure is not the key but udev: without the `libfido2` rules

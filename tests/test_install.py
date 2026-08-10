@@ -49,11 +49,11 @@ def test_install_plan_never_uses_a_shell():
 
 
 def test_extra_name_survives_rich_markup():
-    # `[yubikey]` looks like a rich style tag, which silently swallowed it before.
+    # `[security-key]` looks like a rich style tag, which silently swallowed it before.
     from rich.markup import escape
 
-    assert render(escape(EXTRA_NAME)).plain == "2fas[yubikey]"
-    assert render(EXTRA_NAME).plain != "2fas[yubikey]"  # the bug, kept as a regression guard
+    assert render(escape(EXTRA_NAME)).plain == "2fas[security-key]"
+    assert render(EXTRA_NAME).plain != "2fas[security-key]"  # the bug, kept as a regression guard
 
 
 def test_security_key_gating(tmp_path):
@@ -71,11 +71,11 @@ def test_security_key_gating(tmp_path):
 def test_unlock_method_choice_is_disabled_until_set_up():
     labels = {label: value for value, label in METHOD_LABELS.items()}
 
-    not_set_up = generate_choices(labels, with_exit=False, disabled={"yubikey": "Set up a security key first"})
+    not_set_up = generate_choices(labels, with_exit=False, disabled={"security-key": "Set up a security key first"})
     by_value = {choice.value: choice for choice in not_set_up}
 
     assert by_value["password"].disabled is None
-    assert by_value["yubikey"].disabled == "Set up a security key first"
+    assert by_value["security-key"].disabled == "Set up a security key first"
 
     set_up = generate_choices(labels, with_exit=False, disabled={})
     assert all(choice.disabled is None for choice in set_up)

@@ -3,14 +3,14 @@ This file decides how your vault gets unlocked, and how often you are asked.
 
 Two independent questions:
 
-1. *how* - `unlock-method`, either `password` or `yubikey`. The YubiKey replaces the
+1. *how* - `unlock-method`, either `password` or `security-key`. The key replaces the
    passphrase, it is not a second factor: the .2fas file itself never stops being
    passphrase-encrypted, so the passphrase always remains a valid way in and lock-out is
    impossible. The flip side, worth saying out loud: your effective strength is the weaker
    of the two paths, which is your passphrase.
-2. *how often* - `password-unlock-policy` and `yubikey-unlock-policy`, one of:
+2. *how often* - `password-unlock-policy` and `security-key-unlock-policy`, one of:
 
-   | policy       | password path                          | yubikey path        |
+   | policy       | password path                          | security key path   |
    |--------------|----------------------------------------|---------------------|
    | `os-session` | asked once per boot (key in keyring)   | one touch per boot  |
    | `process`    | asked once per run of `2fas`           | one touch per run   |
@@ -18,7 +18,7 @@ Two independent questions:
 
    These are configured separately because the passphrase stays a live fallback, so both
    paths are in daily use, and because they do not cost the same: a tighter policy costs
-   the YubiKey user a one-second touch and the passphrase user a full master passphrase.
+   the key user a one-second touch and the passphrase user a full master passphrase.
 
 What is cached is the derived 32-byte AES key, never the passphrase. A stolen cache
 therefore does not reveal a passphrase you may have reused elsewhere.
@@ -43,17 +43,17 @@ from rich.markup import escape
 
 from .cli_settings import CliSettings
 from .keystore import KeyStore, WrappedKey, new_wrapped_key, vault_id_for
-from .yubikey import YubiKeyError
+from .security_key import SecurityKeyError
 
-UnlockMethod = typing.Literal["password", "yubikey"]
+UnlockMethod = typing.Literal["password", "security-key"]
 UnlockPolicy = typing.Literal["os-session", "process", "code"]
 
-UNLOCK_METHODS: tuple[UnlockMethod, ...] = ("password", "yubikey")
+UNLOCK_METHODS: tuple[UnlockMethod, ...] = ("password", "security-key")
 UNLOCK_POLICIES: tuple[UnlockPolicy, ...] = ("os-session", "process", "code")
 
 DEFAULT_METHOD: UnlockMethod = "password"
 DEFAULT_PASSWORD_POLICY: UnlockPolicy = "os-session"
-DEFAULT_YUBIKEY_POLICY: UnlockPolicy = "process"
+DEFAULT_SECURITY_KEY_POLICY: UnlockPolicy = "process"
 
 POLICY_HELP: dict[UnlockPolicy, str] = {
     "os-session": "once per boot",
@@ -264,7 +264,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
 
     method: UnlockMethod
     password_policy: UnlockPolicy
-    yubikey_policy: UnlockPolicy
+    security_key_policy: UnlockPolicy
     force_password: bool
 
     # which path actually produced the key we are using. The policy follows the path
@@ -277,7 +277,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         self,
         method: UnlockMethod = DEFAULT_METHOD,
         password_policy: UnlockPolicy = DEFAULT_PASSWORD_POLICY,
-        yubikey_policy: UnlockPolicy = DEFAULT_YUBIKEY_POLICY,
+        security_key_policy: UnlockPolicy = DEFAULT_SECURITY_KEY_POLICY,
         force_password: bool = False,
         store: KeyStore = None,
         touch_timeout: float = None,
@@ -286,14 +286,14 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         Args:
             method: which path to try first.
             password_policy: how often to ask for the passphrase.
-            yubikey_policy: how often to ask for a touch.
+            security_key_policy: how often to ask for a touch.
             force_password: skip the security key entirely (the `--password` escape hatch).
             store: where wrapped keys live; overridable for tests.
             touch_timeout: seconds to wait for a touch.
         """
         self.method = method
         self.password_policy = password_policy
-        self.yubikey_policy = yubikey_policy
+        self.security_key_policy = security_key_policy
         self.force_password = force_password
         self.store = store if store is not None else KeyStore()
         self.touch_timeout = touch_timeout
@@ -310,22 +310,22 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         return cls(
             method=parse_method(settings.unlock_method),
             password_policy=parse_policy(settings.password_unlock_policy, DEFAULT_PASSWORD_POLICY),
-            yubikey_policy=parse_policy(settings.yubikey_unlock_policy, DEFAULT_YUBIKEY_POLICY),
+            security_key_policy=parse_policy(settings.security_key_unlock_policy, DEFAULT_SECURITY_KEY_POLICY),
             force_password=force_password,
         )
 
     # --- policy ---
 
-    def _import_yubikey(self) -> typing.Any:
+    def _import_backend(self) -> typing.Any:
         """
         Import the security key backend lazily.
 
         Lazily because `fido2` is an optional dependency, and as a method because it is
         the seam tests use to stand in for hardware.
         """
-        from . import yubikey
+        from . import security_key
 
-        return yubikey
+        return security_key
 
     def vault(self) -> tuple[str, bytes, str] | None:
         """
@@ -344,7 +344,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         """
         The policy governing one specific path, regardless of which one we are on.
         """
-        return self.yubikey_policy if path == "yubikey" else self.password_policy
+        return self.security_key_policy if path == "security-key" else self.password_policy
 
     def _may_persist(self) -> bool:
         return self.effective_policy() == "os-session"
@@ -356,10 +356,10 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         Falls back to the passphrase when the security key is configured but this
         particular vault has no key set up, since that is what would happen anyway.
         """
-        if self.force_password or self.method != "yubikey":
+        if self.force_password or self.method != "security-key":
             return "password"
 
-        return "yubikey" if self.store.get(vault_id) else "password"
+        return "security-key" if self.store.get(vault_id) else "password"
 
     def _cached(self, vault_id: str) -> CachedKey | None:
         """
@@ -403,7 +403,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
             self.process_cache.put(vault_id, cached)
             return cached.key
 
-        if cached := self._unlock_with_yubikey(vault_id):
+        if cached := self._unlock_with_security_key(vault_id):
             return self._accept(vault_id, cached)
 
         return self._accept(vault_id, self._unlock_with_password(filename, salt))
@@ -422,7 +422,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         self.session_cache.drop(vault_id)
         lib2fas.keyring_manager.delete_credentials(filename)
 
-        if self.used_path == "yubikey":
+        if self.used_path == "security-key":
             print("The key stored for your security key did not fit this vault; removing it.", file=sys.stderr)
             self.store.delete(vault_id)
             self.force_password = True
@@ -451,28 +451,28 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
 
         return cached.key
 
-    def _unlock_with_yubikey(self, vault_id: str) -> CachedKey | None:
+    def _unlock_with_security_key(self, vault_id: str) -> CachedKey | None:
         """
         Unwrap this vault's key with the enrolled security key, or None to fall back.
         """
-        if self.force_password or self.method != "yubikey":
+        if self.force_password or self.method != "security-key":
             return None
 
         if not (wrapped := self.store.get(vault_id)):
             rich.print("[yellow]No security key is set up for this vault " "(run `2fas --setup-key`).[/yellow]")
             return None
 
-        yubikey = self._import_yubikey()
+        backend = self._import_backend()
 
         try:
-            secret = yubikey.evaluate_hmac_secret(
+            secret = backend.evaluate_hmac_secret(
                 wrapped.credential_id,
                 wrapped.hmac_salt,
-                timeout=self.touch_timeout or yubikey.DEFAULT_TIMEOUT,
+                timeout=self.touch_timeout or backend.DEFAULT_TIMEOUT,
                 announce=announce_touch,
             )
-            return CachedKey(yubikey.unwrap_key(secret, vault_id, wrapped.nonce, wrapped.ciphertext), "yubikey")
-        except YubiKeyError as e:
+            return CachedKey(backend.unwrap_key(secret, vault_id, wrapped.nonce, wrapped.ciphertext), "security-key")
+        except SecurityKeyError as e:
             rich.print(
                 f"[yellow]Security key unavailable ({escape(str(e))}) - " "falling back to your passphrase.[/yellow]"
             )
@@ -520,11 +520,11 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         filename, salt, vault_id = self._vault
 
         try:
-            if self.used_path == "yubikey":
-                fresh = self._confirm_with_yubikey(vault_id)
+            if self.used_path == "security-key":
+                fresh = self._confirm_with_security_key(vault_id)
             else:
                 fresh = lib2fas.derive_key(getpass.getpass(f"Passphrase for '{filename}'? "), salt)
-        except YubiKeyError as e:
+        except SecurityKeyError as e:
             rich.print(f"[red]Could not confirm with your security key: {escape(str(e))}[/red]")
             return False
 
@@ -534,20 +534,20 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         rich.print("[red]That did not match; not showing the code.[/red]")
         return False
 
-    def _confirm_with_yubikey(self, vault_id: str) -> bytes:
+    def _confirm_with_security_key(self, vault_id: str) -> bytes:
         wrapped = self.store.get(vault_id)
         if wrapped is None:  # pragma: no cover
-            raise YubiKeyError("The enrolment for this vault disappeared.")
+            raise SecurityKeyError("The enrolment for this vault disappeared.")
 
-        yubikey = self._import_yubikey()
+        backend = self._import_backend()
 
-        secret = yubikey.evaluate_hmac_secret(
+        secret = backend.evaluate_hmac_secret(
             wrapped.credential_id,
             wrapped.hmac_salt,
-            timeout=self.touch_timeout or yubikey.DEFAULT_TIMEOUT,
+            timeout=self.touch_timeout or backend.DEFAULT_TIMEOUT,
             announce=announce_touch,
         )
-        return typing.cast(bytes, yubikey.unwrap_key(secret, vault_id, wrapped.nonce, wrapped.ciphertext))
+        return typing.cast(bytes, backend.unwrap_key(secret, vault_id, wrapped.nonce, wrapped.ciphertext))
 
 
 def announce_touch() -> None:
@@ -584,18 +584,18 @@ def enroll(
         the vault id the enrolment was filed under.
 
     Raises:
-        YubiKeyError: and subclasses.
+        SecurityKeyError: and subclasses.
     """
-    from . import yubikey
+    from . import security_key
 
     store = store if store is not None else KeyStore()
-    timeout = timeout or yubikey.DEFAULT_TIMEOUT
+    timeout = timeout or security_key.DEFAULT_TIMEOUT
     vault_id = vault_id_for(salt)
 
-    credential_id = yubikey.create_credential(pin=pin, timeout=timeout, announce=announce_touch)
-    hmac_salt = yubikey.new_hmac_salt()
-    secret = yubikey.evaluate_hmac_secret(credential_id, hmac_salt, timeout=timeout, announce=announce_touch)
-    nonce, ciphertext = yubikey.wrap_key(secret, vault_id, vault_key)
+    credential_id = security_key.create_credential(pin=pin, timeout=timeout, announce=announce_touch)
+    hmac_salt = security_key.new_hmac_salt()
+    secret = security_key.evaluate_hmac_secret(credential_id, hmac_salt, timeout=timeout, announce=announce_touch)
+    nonce, ciphertext = security_key.wrap_key(secret, vault_id, vault_key)
 
     store.put(
         new_wrapped_key(
@@ -604,7 +604,7 @@ def enroll(
             hmac_salt=hmac_salt,
             nonce=nonce,
             ciphertext=ciphertext,
-            rp_id=yubikey.RP_ID,
+            rp_id=security_key.RP_ID,
             filename_hint=filename,
         )
     )

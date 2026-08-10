@@ -29,7 +29,7 @@ import typing
 RP_ID = "2fas.local"
 RP_NAME = "2fas"
 USER_ID = b"2fas-cli"
-HKDF_INFO_PREFIX = b"2fas-yubikey-wrap-v1:"
+HKDF_INFO_PREFIX = b"2fas-security-key-wrap-v1:"
 HMAC_SALT_LENGTH = 32  # required by the hmac-secret extension
 NONCE_LENGTH = 12  # AES-GCM
 DEFAULT_TIMEOUT = 30.0
@@ -41,7 +41,7 @@ DEFAULT_TIMEOUT = 30.0
 ASSERT_OPTIONS: dict[str, bool] = {"up": True, "uv": False}
 
 
-class YubiKeyError(RuntimeError):
+class SecurityKeyError(RuntimeError):
     """
     Anything that went wrong while talking to an authenticator.
 
@@ -49,27 +49,27 @@ class YubiKeyError(RuntimeError):
     """
 
 
-class Fido2NotInstalled(YubiKeyError):
-    """The optional `fido2` dependency is missing (`pip install 2fas[yubikey]`)."""
+class Fido2NotInstalled(SecurityKeyError):
+    """The optional `fido2` dependency is missing (`pip install 2fas[security-key]`)."""
 
 
-class NoAuthenticator(YubiKeyError):
+class NoAuthenticator(SecurityKeyError):
     """No FIDO2 authenticator is plugged in, or we are not allowed to talk to it."""
 
 
-class HmacSecretUnsupported(YubiKeyError):
+class HmacSecretUnsupported(SecurityKeyError):
     """An authenticator was found, but it does not implement the hmac-secret extension."""
 
 
-class TouchTimeout(YubiKeyError):
+class TouchTimeout(SecurityKeyError):
     """The user did not touch the key in time."""
 
 
-class PinRequired(YubiKeyError):
+class PinRequired(SecurityKeyError):
     """Enrolment needs the authenticator's PIN, because one is configured."""
 
 
-class WrongCredential(YubiKeyError):
+class WrongCredential(SecurityKeyError):
     """This authenticator does not know the credential this vault was enrolled with."""
 
 
@@ -87,7 +87,9 @@ def fido2_available() -> bool:
 
 def _require_fido2() -> None:
     if not fido2_available():
-        raise Fido2NotInstalled("The 'fido2' package is required for YubiKey support: pip install '2fas[yubikey]'")
+        raise Fido2NotInstalled(
+            "The 'fido2' package is required for security key support: pip install '2fas[security-key]'"
+        )
 
 
 class Authenticator(typing.NamedTuple):
@@ -224,14 +226,14 @@ def _touch_deadline(timeout: float) -> typing.Iterator[threading.Event]:
         timer.cancel()
 
 
-def _translate_ctap_error(error: Exception, event: threading.Event) -> YubiKeyError:
+def _translate_ctap_error(error: Exception, event: threading.Event) -> SecurityKeyError:
     """
     Turn a raw CtapError into something with an actionable message.
     """
     from fido2.ctap import CtapError
 
     if not isinstance(error, CtapError):  # pragma: no cover
-        return YubiKeyError(str(error))
+        return SecurityKeyError(str(error))
 
     code = error.code
     if event.is_set() or code in (CtapError.ERR.KEEPALIVE_CANCEL, CtapError.ERR.USER_ACTION_TIMEOUT):
@@ -241,7 +243,7 @@ def _translate_ctap_error(error: Exception, event: threading.Event) -> YubiKeyEr
     if code in (CtapError.ERR.NO_CREDENTIALS, CtapError.ERR.INVALID_CREDENTIAL):
         return WrongCredential("This security key was not the one this vault was enrolled with.")
 
-    return YubiKeyError(str(error))
+    return SecurityKeyError(str(error))
 
 
 def _keepalive_printer(announce: typing.Callable[[], None]) -> typing.Callable[[int], None]:
@@ -279,7 +281,7 @@ def create_credential(
         announce: called once when the key is waiting to be touched.
 
     Raises:
-        YubiKeyError: and subclasses; the caller should fall back to the passphrase.
+        SecurityKeyError: and subclasses; the caller should fall back to the passphrase.
     """
     with _hmac_secret_authenticator() as ctap:
         pin_uv_param = None
@@ -317,7 +319,7 @@ def create_credential(
 
         credential = response.auth_data.credential_data
         if credential is None:  # pragma: no cover
-            raise YubiKeyError("The authenticator did not return a credential.")
+            raise SecurityKeyError("The authenticator did not return a credential.")
 
         if not (response.auth_data.extensions or {}).get("hmac-secret"):
             raise HmacSecretUnsupported("The authenticator refused to enable hmac-secret for this credential.")
@@ -341,7 +343,7 @@ def evaluate_hmac_secret(
         announce: called once when the key is waiting to be touched.
 
     Raises:
-        YubiKeyError: and subclasses; the caller should fall back to the passphrase.
+        SecurityKeyError: and subclasses; the caller should fall back to the passphrase.
     """
     if len(hmac_salt) != HMAC_SALT_LENGTH:  # pragma: no cover
         raise ValueError(f"hmac_salt must be {HMAC_SALT_LENGTH} bytes.")
@@ -378,7 +380,7 @@ def evaluate_hmac_secret(
 
         secret = protocol.decrypt(shared, output)
         if secret is None or len(secret) < HMAC_SALT_LENGTH:  # pragma: no cover
-            raise YubiKeyError("The authenticator returned an unusable hmac-secret output.")
+            raise SecurityKeyError("The authenticator returned an unusable hmac-secret output.")
 
         # we only ever send one salt, so only the first 32 bytes are ours:
         return bytes(secret[:HMAC_SALT_LENGTH])
@@ -414,7 +416,7 @@ def unwrap_key(secret: bytes, vault_id: str, nonce: bytes, ciphertext: bytes) ->
     Decrypt a vault key that `wrap_key` produced.
 
     Raises:
-        YubiKeyError: if the token's answer does not fit this blob, e.g. because it is a
+        SecurityKeyError: if the token's answer does not fit this blob, e.g. because it is a
             different security key, or because the blob was written with user
             verification and this assertion was not (or vice versa).
     """
