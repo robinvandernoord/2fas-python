@@ -150,7 +150,7 @@ credential, touch only. That was chosen because it programs *nothing* on your ke
 slot overwritten, no PIV slot occupied, no resident-credential storage consumed, and no PIN
 needed for day-to-day use. Unplug the key and there is no trace of 2fas on it.
 
-Two things to know:
+Three things to know:
 
 - **Setup takes two touches, every unlock afterwards takes one.** The first touch creates
   the credential, the second reads the secret it derives. (CTAP 2.2 can do both in one
@@ -161,16 +161,9 @@ Two things to know:
   hmac-secret output, so a key set up without it stops unwrapping. The setup screen warns
   about this; your passphrase still works, and running `--setup-key` again fixes it.
 
-Before installing anything, you can check whether your key and machine are up to it:
-
-```bash
-pip install fido2
-python scripts/probe_security_key.py
-```
-
 On Linux, the most common failure is not the key but udev: without the `libfido2` rules
-(`70-u2f.rules`) the `/dev/hidraw*` nodes are not accessible to your user. Both the probe
-and the setup screen will tell you if that is what is wrong.
+(`70-u2f.rules`) the `/dev/hidraw*` nodes are not accessible to your user. The setup screen
+says so in as many words when that is what is wrong.
 
 ### What the `code` policy does and does not do
 
