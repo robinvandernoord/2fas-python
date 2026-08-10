@@ -39,6 +39,7 @@ from pathlib import Path
 import lib2fas
 import pyjson5
 import rich
+from rich.markup import escape
 
 from .cli_settings import CliSettings
 from .keystore import KeyStore, WrappedKey, new_wrapped_key, vault_id_for
@@ -414,10 +415,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
             return None
 
         if not (wrapped := self.store.get(vault_id)):
-            rich.print(
-                "[yellow]No security key is enrolled for this vault "
-                "(use `2fas --enroll` after unlocking with your passphrase).[/yellow]"
-            )
+            rich.print("[yellow]No security key is set up for this vault " "(run `2fas --setup-key`).[/yellow]")
             return None
 
         yubikey = self._import_yubikey()
@@ -431,7 +429,9 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
             )
             return CachedKey(yubikey.unwrap_key(secret, vault_id, wrapped.nonce, wrapped.ciphertext), "yubikey")
         except YubiKeyError as e:
-            rich.print(f"[yellow]Security key unavailable ({e}) - falling back to your passphrase.[/yellow]")
+            rich.print(
+                f"[yellow]Security key unavailable ({escape(str(e))}) - " "falling back to your passphrase.[/yellow]"
+            )
             return None
 
     def _unlock_with_password(self, filename: str, salt: bytes) -> CachedKey | None:
@@ -481,7 +481,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
             else:
                 fresh = lib2fas.derive_key(getpass.getpass(f"Passphrase for '{filename}'? "), salt)
         except YubiKeyError as e:
-            rich.print(f"[red]Could not confirm with your security key: {e}[/red]")
+            rich.print(f"[red]Could not confirm with your security key: {escape(str(e))}[/red]")
             return False
 
         if fresh == self.current_key:

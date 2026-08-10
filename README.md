@@ -101,16 +101,32 @@ unlocked, any process running as you can read it.
 ### Unlocking with a YubiKey
 
 ```bash
-pip install '2fas[yubikey]'
-
-2fas --doctor            # check your key, firmware, hmac-secret support and udev rules
-2fas --enroll            # asks for your passphrase once, then two touches
+2fas --setup-key         # sets it up: offers to install what is missing, then two touches
 2fas                     # from now on: one touch, no passphrase
+2fas --doctor            # check your key, firmware, hmac-secret support and udev rules
 2fas --password          # skip the key for one run
-2fas --forget-key        # remove the enrolment for the active file
+2fas --forget-key        # remove the security key setup for the active file
 ```
 
-**The key replaces your passphrase, it is not a second factor.** Enrolment does not
+The same options live under **Settings > Unlocking & security key** in the interactive
+menu, grouped together because they only make sense in relation to each other. Choosing
+"security key" as your unlock method is greyed out until one is actually set up for the
+active file - otherwise you would be picking a method that silently falls back to your
+passphrase on every run.
+
+Security key support needs one extra Python package, `fido2`. You do not have to work out
+how to install it: `2fas --setup-key` detects how 2fas itself was installed (uv tool, pipx,
+a plain venv) and offers to run the right command, preferring `uv` when it is available. It
+always asks first and never installs anything behind your back. If you would rather do it
+yourself:
+
+```bash
+uv tool install --with fido2 2fas   # if you installed 2fas as a uv tool
+pipx inject 2fas fido2             # if you used pipx
+uv pip install fido2               # or pip install fido2, in a plain venv
+```
+
+**The key replaces your passphrase, it is not a second factor.** Setting one up does not
 re-encrypt your `.2fas` file; it stores an extra copy of the vault key, encrypted under a
 secret only your security key can produce, in `~/.config/2fas/keys/`. Your file stays
 passphrase-encrypted, which has two consequences worth being explicit about:
@@ -128,11 +144,11 @@ needed for day-to-day use. Unplug the key and there is no trace of 2fas on it.
 
 Two things to know:
 
-- **Enrolment needs your key's PIN if you have one set.** CTAP2 requires it to create a
+- **Setup needs your key's PIN if you have one set.** CTAP2 requires it to create a
   credential. Unlocking afterwards never does.
-- **Do not enable `alwaysUv` on your key after enrolling.** User verification changes the
-  hmac-secret output, so a key enrolled without it stops unwrapping. `2fas --doctor` warns
-  about this; your passphrase still works, and re-enrolling fixes it.
+- **Do not enable `alwaysUv` on your key after setting it up.** User verification changes the
+  hmac-secret output, so a key set up without it stops unwrapping. `2fas --doctor` warns
+  about this; your passphrase still works, and running `--setup-key` again fixes it.
 
 Before installing anything, you can check whether your key and machine are up to it:
 
