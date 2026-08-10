@@ -92,7 +92,7 @@ def _require_fido2() -> None:
 
 class Authenticator(typing.NamedTuple):
     """
-    A description of a connected authenticator, for `--doctor`.
+    A description of a connected authenticator, for the setup screen.
     """
 
     product: str

@@ -338,10 +338,54 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         The policy governing the path we are actually on.
         """
         path = self.used_path or ("password" if self.force_password else self.method)
+        return self.policy_for(path)
+
+    def policy_for(self, path: UnlockMethod) -> UnlockPolicy:
+        """
+        The policy governing one specific path, regardless of which one we are on.
+        """
         return self.yubikey_policy if path == "yubikey" else self.password_policy
 
     def _may_persist(self) -> bool:
         return self.effective_policy() == "os-session"
+
+    def intended_path(self, vault_id: str) -> UnlockMethod:
+        """
+        The path this unlock is supposed to take, before anything has been tried.
+
+        Falls back to the passphrase when the security key is configured but this
+        particular vault has no key set up, since that is what would happen anyway.
+        """
+        if self.force_password or self.method != "yubikey":
+            return "password"
+
+        return "yubikey" if self.store.get(vault_id) else "password"
+
+    def _cached(self, vault_id: str) -> CachedKey | None:
+        """
+        Find a usable cached key, or None if the policy says we must ask again.
+
+        Two conditions, and both were missing before:
+
+        - the cache entry has to come from the path we are configured to use. A key cached
+          while unlocking with a passphrase must not silently satisfy a run configured to
+          use the security key - that would make the setting look like it did nothing.
+        - the keyring (cross-process) cache may only be read when *that* path's policy is
+          `os-session`. Under `process` the promise is "ask once per run", and reading a
+          key another run left behind breaks it just as thoroughly as writing one would.
+        """
+        intended = self.intended_path(vault_id)
+
+        if (cached := self.process_cache.get(vault_id)) and cached.via == intended:
+            return cached
+
+        if self.policy_for(intended) != "os-session":
+            return None
+
+        if (cached := self.session_cache.get(vault_id)) and cached.via == intended:
+            return cached
+
+        return None
 
     # --- UnlockerProtocol ---
 
@@ -352,7 +396,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         vault_id = vault_id_for(salt)
         self._vault = (filename, salt, vault_id)
 
-        if cached := (self.process_cache.get(vault_id) or self.session_cache.get(vault_id)):
+        if cached := self._cached(vault_id):
             self.used_path = cached.via
             self.current_key = cached.key
             # a key found in the session keyring is worth keeping for this process too:

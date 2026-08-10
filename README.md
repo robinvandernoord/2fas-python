@@ -103,14 +103,17 @@ unlocked, any process running as you can read it.
 ```bash
 2fas --setup-key         # sets it up: offers to install what is missing, then two touches
 2fas                     # from now on: one touch, no passphrase
-2fas --doctor            # check your key, firmware, hmac-secret support and udev rules
 2fas --password          # skip the key for one run
 2fas --forget-key        # remove the security key setup for the active file
 ```
 
 The same options live under **Settings > Unlocking & security key** in the interactive
-menu, grouped together because they only make sense in relation to each other. Choosing
-"security key" as your unlock method is greyed out until one is actually set up for the
+menu, grouped together because they only make sense in relation to each other. That screen
+also reports what 2fas can see of your key - product, firmware, whether hmac-secret is
+supported, and on Linux whether udev is in the way - so there is no separate diagnostics
+command to remember.
+
+Choosing "security key" as your unlock method is greyed out until one is actually set up for the
 active file - otherwise you would be picking a method that silently falls back to your
 passphrase on every run.
 
@@ -147,7 +150,7 @@ Two things to know:
 - **Setup needs your key's PIN if you have one set.** CTAP2 requires it to create a
   credential. Unlocking afterwards never does.
 - **Do not enable `alwaysUv` on your key after setting it up.** User verification changes the
-  hmac-secret output, so a key set up without it stops unwrapping. `2fas --doctor` warns
+  hmac-secret output, so a key set up without it stops unwrapping. The setup screen warns
   about this; your passphrase still works, and running `--setup-key` again fixes it.
 
 Before installing anything, you can check whether your key and machine are up to it:
@@ -159,7 +162,7 @@ python scripts/probe_yubikey.py
 
 On Linux, the most common failure is not the key but udev: without the `libfido2` rules
 (`70-u2f.rules`) the `/dev/hidraw*` nodes are not accessible to your user. Both the probe
-and `2fas --doctor` will tell you if that is what is wrong.
+and the setup screen will tell you if that is what is wrong.
 
 ### What the `code` policy does and does not do
 

@@ -2,7 +2,6 @@
 This file contains the Typer CLI.
 """
 
-import getpass
 import os
 import sys
 import typing
@@ -17,9 +16,6 @@ from rich.markup import escape
 from . import yubikey
 from .__about__ import __version__
 from .cli_settings import (
-    CONFIG_DIR,
-    DEFAULT_SETTINGS,
-    KEYS_DIR,
     expand_path,
     get_cli_setting,
     load_cli_settings,
@@ -370,12 +366,12 @@ def command_enroll(filename: str) -> None:
         authenticators = yubikey.describe_authenticators()
     except yubikey.YubiKeyError as e:
         rich.print(f"[red]{escape(str(e))}[/red]")
-        rich.print("Run `2fas --doctor` to see what is wrong.")
+        print_security_key_status()
         return
 
     if not any(_.supports_hmac_secret for _ in authenticators):
-        rich.print("[red]No security key that supports hmac-secret is connected.[/red]")
-        rich.print("Run `2fas --doctor` to see what is wrong.")
+        rich.print("[red]No usable security key is connected.[/red]")
+        print_security_key_status()
         return
 
     # enrolling wraps the key the *passphrase* produces, so the security key path is
@@ -399,7 +395,9 @@ def command_enroll(filename: str) -> None:
         # even though the unlocks afterwards will only need a touch.
         rich.print("[blue]Your security key has a PIN, which CTAP2 requires to register a new credential.[/blue]")
         rich.print("[blue]You will not need it again for day-to-day unlocking.[/blue]")
-        pin = getpass.getpass("Security key PIN? ") or None
+        # questionary rather than getpass, so the user gets * per character instead of a
+        # dead-looking prompt.
+        pin = questionary.password("Security key PIN?", style=generate_custom_style()).ask() or None
 
     try:
         enroll(active_file, salt, unlocker.current_key, pin=pin)
@@ -459,63 +457,48 @@ def _hidraw_diagnosis() -> str:
     return f"{len(nodes)} /dev/hidraw* nodes are accessible, but none of them answered as a FIDO2 authenticator"
 
 
-def command_doctor(filename: str) -> None:
+def print_security_key_status() -> None:
     """
-    `--doctor` to check whether security key unlocking can work on this machine.
+    Say what 2fas can see of your security key, in one short block.
 
-    Everything here is read-only and needs no touch, so it is safe to run any time.
+    This lives in the setup screen rather than behind its own command: the only moment
+    anyone wants to know their firmware version or whether udev is in the way is the moment
+    setting up or unlocking did not work.
     """
-    rich.print("[bold]2fas doctor[/bold]\n")
-
-    settings = state.settings
-    rich.print("[bold]Configuration[/bold]")
-    rich.print(f"- config directory: {CONFIG_DIR}")
-    rich.print(f"- settings file: {DEFAULT_SETTINGS}")
-    rich.print(f"- wrapped keys: {KEYS_DIR}")
-    method = parse_method(settings.unlock_method)
-    password_policy = parse_policy(settings.password_unlock_policy, "os-session")
-    yubikey_policy = parse_policy(settings.yubikey_unlock_policy, "process")
-    rich.print(f"- unlock-method: [blue]{method}[/blue]")
-    rich.print(f"- password-unlock-policy: [blue]{password_policy}[/blue] ({POLICY_HELP[password_policy]})")
-    rich.print(f"- yubikey-unlock-policy: [blue]{yubikey_policy}[/blue] ({POLICY_HELP[yubikey_policy]})")
-
-    rich.print("\n[bold]Security key[/bold]")
     if not yubikey.fido2_available():
         rich.print(
-            f"- [yellow]fido2 not installed[/yellow] - security key unlocking is off. "
-            f"Install it with: [bold]{escape(detect_install_plan().as_shell())}[/bold]"
+            "Connected key:  [yellow]unknown[/yellow] - the fido2 package is not installed "
+            f"([bold]{escape(detect_install_plan().as_shell())}[/bold])"
         )
-    else:
-        try:
-            authenticators = yubikey.describe_authenticators()
-        except yubikey.YubiKeyError as e:
-            authenticators = []
-            rich.print(f"- [red]{escape(str(e))}[/red]")
+        return
 
-        if not authenticators:
-            rich.print(f"- [yellow]{_hidraw_diagnosis()}[/yellow]")
-        for auth in authenticators:
-            rich.print(f"- {auth.product} (firmware {auth.firmware})")
-            hmac = "[green]yes[/green]" if auth.supports_hmac_secret else "[red]no[/red]"
-            rich.print(f"  - hmac-secret: {hmac}")
-            rich.print(f"  - PIN configured: {'yes' if auth.has_pin else 'no'} (only needed to enroll)")
-            if auth.always_uv:
-                rich.print(
-                    "  - [yellow]alwaysUv is enabled on this key. That forces user verification, "
-                    "which changes the hmac-secret output, so a key enrolled without it will stop "
-                    "unwrapping. Your passphrase still works; re-enroll to fix it.[/yellow]"
-                )
+    try:
+        authenticators = yubikey.describe_authenticators()
+    except yubikey.YubiKeyError as e:
+        rich.print(f"Connected key:  [red]{escape(str(e))}[/red]")
+        return
 
-    rich.print("\n[bold]Enrolled vaults[/bold]")
-    if not (enrolled := KeyStore().all()):
-        rich.print("- none yet (run `2fas --setup-key`, or Settings > Unlocking & security key)")
-    active_salt = vault_salt(filename)
-    active_id = vault_id_for(active_salt) if active_salt else None
-    for wrapped in enrolled:
-        marker = " [green](active file)[/green]" if wrapped.vault_id == active_id else ""
-        hint = wrapped.filename_hint or "unknown file"
-        exists = "" if Path(wrapped.filename_hint or "").exists() else " [yellow](file not found)[/yellow]"
-        rich.print(f"- {wrapped.vault_id[:12]}… {hint}{exists}{marker}")
+    usable = [_ for _ in authenticators if _.supports_hmac_secret]
+    if not authenticators:
+        rich.print(f"Connected key:  [yellow]none[/yellow] - {_hidraw_diagnosis()}")
+        return
+
+    for auth in authenticators:
+        if not auth.supports_hmac_secret:
+            rich.print(f"Connected key:  [red]{auth.product} does not support hmac-secret[/red]")
+            continue
+
+        pin = ", has a PIN (only needed during setup)" if auth.has_pin else ""
+        rich.print(f"Connected key:  [green]{auth.product}[/green] (firmware {auth.firmware}{pin})")
+        if auth.always_uv:
+            rich.print(
+                "                [yellow]alwaysUv is enabled on this key. That forces user "
+                "verification, which changes the hmac-secret output, so a key set up without it "
+                "stops working. Your passphrase still works; run setup again to fix it.[/yellow]"
+            )
+
+    if not usable:
+        rich.print("                [yellow]Nothing connected can be used to unlock your vault.[/yellow]")
 
 
 def get_setting(key: str) -> None:
@@ -645,9 +628,9 @@ def choose_unlock_method(filename: str) -> None:
         style=generate_custom_style(),
     ).ask()
 
-    if chosen is not None:
-        set_cli_setting("unlock-method", chosen)
-        state.settings.unlock_method = chosen
+    if (method := parse_method(chosen, current)) != current:
+        set_cli_setting("unlock-method", method)
+        state.settings.unlock_method = method
 
     return command_security(filename)
 
@@ -678,17 +661,22 @@ def choose_unlock_policy(filename: str, method: UnlockMethod) -> None:
     )
 
     rich.print(f"[blue]{setting}:[/blue] {current} ({POLICY_HELP[current]})")
-    labels = {f"{policy}: {cost}": policy for policy, cost in costs.items()}
+
+    # Choice(title, value): questionary hands back the value, so nothing has to map a
+    # display string back to a setting. Indexing a dict with whatever came out of the
+    # prompt is how this screen used to crash with KeyError.
     chosen = questionary.select(
         "How often should 2fas ask?",
-        choices=list(labels),
-        default=next(label for label, value in labels.items() if value == current),
+        choices=[
+            questionary.Choice(f"{policy}: {cost}{' (current)' if policy == current else ''}", policy)
+            for policy, cost in costs.items()
+        ],
         style=generate_custom_style(),
     ).ask()
 
-    if chosen is not None:
-        set_cli_setting(setting, labels[chosen])
-        setattr(state.settings, setting.replace("-", "_"), labels[chosen])
+    if (policy := parse_policy(chosen, current)) != current:
+        set_cli_setting(setting, policy)
+        setattr(state.settings, setting.replace("-", "_"), policy)
 
     return command_security(filename)
 
@@ -709,12 +697,17 @@ def command_security(filename: str) -> None:
     method = parse_method(state.settings.unlock_method)
     is_set_up = is_security_key_set_up(filename)
 
-    rich.print(f"Active file: [blue]{filename}[/blue]")
-    rich.print(f"Unlock method: [blue]{METHOD_LABELS[method]}[/blue]")
+    password_policy = parse_policy(state.settings.password_unlock_policy, "os-session")
+    yubikey_policy = parse_policy(state.settings.yubikey_unlock_policy, "process")
+
+    rich.print(f"Active file:    [blue]{filename}[/blue]")
+    rich.print(f"Unlock method:  [blue]{METHOD_LABELS[method]}[/blue]")
     if is_set_up:
-        rich.print("Security key: [green]set up for this file[/green]")
+        rich.print("Security key:   [green]set up for this file[/green]")
     else:
-        rich.print("Security key: [yellow]not set up for this file[/yellow]")
+        rich.print("Security key:   [yellow]not set up for this file[/yellow]")
+    rich.print(f"Asks you:       passphrase {POLICY_HELP[password_policy]}, touch {POLICY_HELP[yubikey_policy]}")
+    print_security_key_status()
     rich.print("")
 
     setup_label = (
@@ -730,7 +723,6 @@ def command_security(filename: str) -> None:
                 "Change unlock method (passphrase / security key)": "unlock-method",
                 "How often to ask for my passphrase": "password-policy",
                 "How often to touch my security key": "touch-policy",
-                "Check my security key setup (doctor)": "doctor",
                 "Back": "back",
             },
             disabled=needs_key,
@@ -749,9 +741,6 @@ def command_security(filename: str) -> None:
             return choose_unlock_policy(filename, "password")
         case "touch-policy":
             return choose_unlock_policy(filename, "yubikey")
-        case "doctor":
-            command_doctor(filename)
-            _pause()
         case "back":
             return command_settings(filename)
         case _:
@@ -881,9 +870,6 @@ def main(
     remove: bool = typer.Option(
         False, "--remove", "--rm", "-r", help="`--remove <filename>` to remove a .2fas file from the known files"
     ),
-    doctor: bool = typer.Option(
-        False, "--doctor", help="Check whether unlocking with a security key can work on this machine."
-    ),
     enroll_key: bool = typer.Option(
         False,
         "--setup-key",
@@ -959,9 +945,7 @@ def main(
     # build the unlocker before anything can decrypt, so `--password` is respected:
     get_unlocker(force_password=password)
 
-    if doctor:
-        return command_doctor(filename)
-    elif enroll_key:
+    if enroll_key:
         return command_enroll(filename)
     elif forget_key:
         return command_forget_key(filename)

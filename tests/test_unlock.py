@@ -337,3 +337,104 @@ def test_confirmation_touches_the_key_every_time(store, salt, key, no_session_ca
     assert unlocker.confirm()
     assert unlocker.confirm()
     assert fake.touches == 3  # one unlock plus two confirmations
+
+
+# --- the cache must respect both the configured method and the policy tier ---
+
+
+class FakeSessionCache:
+    """Stands in for the login keyring, which the test container does not have."""
+
+    def __init__(self, **entries: CachedKey) -> None:
+        self.entries = dict(entries)
+        self.writes: list[tuple[str, str]] = []
+
+    def get(self, vault_id):
+        return self.entries.get(vault_id)
+
+    def put(self, vault_id, cached):
+        self.entries[vault_id] = cached
+        self.writes.append((vault_id, cached.via))
+
+    def drop(self, vault_id):
+        self.entries.pop(vault_id, None)
+
+
+def unlocker_with(store, salt, session: FakeSessionCache, **kwargs) -> PolicyUnlocker:
+    unlocker = PolicyUnlocker(store=store, **kwargs)
+    unlocker.session_cache = session
+    return unlocker
+
+
+def test_process_policy_ignores_a_key_another_run_left_behind(monkeypatch, store, salt, key):
+    # 'once per run' has to mean it, so the cross-process cache may not even be read.
+    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "password")})
+    monkeypatch.setattr("getpass.getpass", typed(PASSWORD))
+
+    assert unlocker_with(store, salt, session, password_policy="process").unlock(FILENAME, salt) == key
+    assert unlocker_with(store, salt, session, password_policy="os-session").unlock(FILENAME, salt) == key
+
+    # under os-session it comes from the keyring; under process it must have been asked for:
+    prompted = []
+    monkeypatch.setattr("getpass.getpass", lambda p: prompted.append(p) or PASSWORD)
+
+    unlocker_with(store, salt, session, password_policy="os-session").unlock(FILENAME, salt)
+    assert prompted == []
+
+    unlocker_with(store, salt, session, password_policy="process").unlock(FILENAME, salt)
+    assert len(prompted) == 1
+
+
+def test_a_passphrase_cache_does_not_satisfy_the_security_key_method(monkeypatch, store, salt, key):
+    # the bug: after setting up a key, a key cached by the earlier passphrase run kept
+    # unlocking the vault, so switching the method looked like it did nothing at all.
+    fake = FakeYubiKey()
+    enrolled_store(store, salt, key, fake)
+    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "password")})
+
+    unlocker = unlocker_with(store, salt, session, method="yubikey", yubikey_policy="os-session")
+    unlocker._import_yubikey = lambda: fake
+
+    assert unlocker.unlock(FILENAME, salt) == key
+    assert unlocker.used_path == "yubikey"
+    assert fake.touches == 1
+
+
+def test_a_security_key_cache_is_reused_under_os_session(store, salt, key):
+    fake = FakeYubiKey()
+    enrolled_store(store, salt, key, fake)
+    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "yubikey")})
+
+    unlocker = unlocker_with(store, salt, session, method="yubikey", yubikey_policy="os-session")
+    unlocker._import_yubikey = lambda: fake
+
+    assert unlocker.unlock(FILENAME, salt) == key
+    assert fake.touches == 0  # one touch per boot, and this boot already had one
+
+
+def test_security_key_touches_every_run_under_process(store, salt, key):
+    fake = FakeYubiKey()
+    enrolled_store(store, salt, key, fake)
+    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "yubikey")})
+
+    unlocker = unlocker_with(store, salt, session, method="yubikey", yubikey_policy="process")
+    unlocker._import_yubikey = lambda: fake
+
+    assert unlocker.unlock(FILENAME, salt) == key
+    assert fake.touches == 1
+    assert session.writes == []  # and nothing is left behind for the next run
+
+    # ...but within this one run the key is not asked for twice:
+    assert unlocker.unlock(FILENAME, salt) == key
+    assert fake.touches == 1
+
+
+def test_unenrolled_vault_uses_the_passphrase_cache(monkeypatch, store, salt, key):
+    # method is yubikey, but this particular vault has no key set up: the passphrase is
+    # what will be used, so its cache is the right one to consult.
+    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "password")})
+    monkeypatch.setattr("getpass.getpass", typed("would fail if it were asked"))
+
+    unlocker = unlocker_with(store, salt, session, method="yubikey", password_policy="os-session")
+    assert unlocker.unlock(FILENAME, salt) == key
+    assert unlocker.used_path == "password"
