@@ -29,19 +29,19 @@ def with_parens_without_arg() -> str:
 def test_returntype_clear_with_arg() -> None:
     xyz = with_parens_with_arg("xyz")
 
-    typing.reveal_type(xyz)  # R: builtins.str
+    typing.reveal_type(xyz)  # R: str
 
     abc = without_parens_with_arg("xyz")
 
-    typing.reveal_type(abc)  # R: builtins.str
+    typing.reveal_type(abc)  # R: str
 
 
 @pytest.mark.mypy_testing
 def test_returntype_clear_without_arg() -> None:
     xyz = with_parens_without_arg()
 
-    typing.reveal_type(xyz)  # R: builtins.str
+    typing.reveal_type(xyz)  # R: str
 
     abc = without_parens_without_arg()
 
-    typing.reveal_type(abc)  # R: builtins.str
+    typing.reveal_type(abc)  # R: str

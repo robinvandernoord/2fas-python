@@ -2,4 +2,6 @@
 This file stores the module version.
 """
 
-__version__ = "1.1.1"
+from importlib.metadata import version
+
+__version__ = version("2fas")

@@ -4,10 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "2fas"
-dynamic = ["version"]
 description = 'Unofficial implementation of 2fas for Python (as a CLI tool)'
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 keywords = []
 authors = [
@@ -16,7 +15,6 @@ authors = [
 classifiers = [
     "Development Status :: 4 - Beta",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -25,12 +23,14 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    "lib2fas>=0.1.9",
+    "lib2fas>=1.0.0",
     "configuraptor>=1.25",
     "typer[all]",
     "questionary",
-    "typing-extensions",
+    "keyring",
+    "pyjson5",
 ]
+version = "1.1.1"
 
 [template.plugins.default]
 src-layout = true
@@ -39,9 +39,14 @@ src-layout = true
 "twofas" = ["py.typed"]
 
 [project.optional-dependencies]
+# unlocking your vault with a FIDO2 security key (YubiKey, SoloKey, Nitrokey, ...);
+# not required for normal use.
+security-key = [
+    "fido2>=1.1",
+    "cryptography",
+]
 dev = [
     "hatch",
-    "python-semantic-release<8",
     "su6[all]",
     "pytest-mypy-testing",
     "edwh",
@@ -56,21 +61,54 @@ Documentation = "https://github.com/robinvandernoord/2fas-python#readme"
 Issues = "https://github.com/robinvandernoord/2fas-python/issues"
 Source = "https://github.com/robinvandernoord/2fas-python"
 
-[tool.hatch.version]
-path = "src/twofas/__about__.py"
-
 [tool.hatch.build.targets.wheel]
 packages = ["src/twofas"]
 
-[tool.semantic_release]
-branch = "master"
-version_variable = "src/twofas/__about__.py:__version__"
-change_log = "CHANGELOG.md"
-upload_to_repository = false
-upload_to_release = false
-build_command = "hatch build"
+[tool.vommit]
+allow_breaking_bang = true
+allow_breaking_footer = true
+prerelease_token = "beta"
+confirm = true
 
-### required in every su6 pyproject: ###
+[tool.vommit.git]
+enabled = true
+origin = "origin"
+branch = "master"
+on_wrong_branch = "error"
+tag_format = "v{version}"
+commit_format = "{version}"
+
+[tool.vommit.changelog]
+enabled = true
+file = "CHANGELOG.md"
+include_prereleases = false
+placeholder = "<!--next-version-placeholder-->"
+placeholder_regex = "<auto>"
+entry_title_format = "## v{version} ({date:%Y-%m-%d})"
+
+[tool.vommit.changelog.levels]
+feat = "Feature{s}"
+fix = "Fix{es}"
+break = "Breaking Change{s}"
+docs = "Documentation"
+perf = "Performance"
+
+[tool.vommit.pypi]
+enabled = true
+use_keyring = true
+
+[tool.vommit.commands]
+clean = "rm -rf ./dist"
+build = "uv build"
+publish = "uv publish"
+post_publish = ""
+
+[tool.vommit.version_bump_map]
+break = "major"
+feat = "minor"
+fix = "patch"
+perf = "patch"
+
 [tool.su6]
 # every checker:
 directory = "src"
@@ -87,7 +125,7 @@ json-indent = 2
 
 
 [tool.black]
-target-version = ["py310"]
+target-version = ["py311"]
 line-length = 120
 # 'extend-exclude' excludes files or directories in addition to the defaults
 extend-exclude = '''
@@ -120,9 +158,9 @@ strict = true
 exclude = ["venv", ".bak"]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 120
-extend-exclude = ["*.bak/", "venv*/"]
+extend-exclude = ["*.bak/", "venv*/", "tests/"]
 
 [tool.ruff.lint]
 select = [
@@ -196,3 +234,6 @@ pythonpath = [
 omit = [
     "src/twofas/cli.py",
 ]
+
+[tool.ty.src]
+exclude = ["tests"]

@@ -2,6 +2,7 @@
 This file deals with managing settings for 2fas.
 """
 
+import sys
 import typing
 from pathlib import Path
 from typing import Any
@@ -11,11 +12,47 @@ from configuraptor import TypedConfig, asdict, beautify, singleton
 from configuraptor.core import convert_key
 
 config = Path("~/.config").expanduser()
-config.mkdir(exist_ok=True)
-DEFAULT_SETTINGS = config / "2fas.toml"
-DEFAULT_SETTINGS.touch(exist_ok=True)
+
+# 2fas used to be a single file (~/.config/2fas.toml), but it now also stores per-vault
+# blobs (wrapped keys), which do not belong in a settings file. Hence a directory.
+CONFIG_DIR = config / "2fas"
+DEFAULT_SETTINGS = CONFIG_DIR / "config.toml"
+KEYS_DIR = CONFIG_DIR / "keys"
+
+# every path this settings file has previously lived at, oldest first:
+LEGACY_SETTINGS = [config / "2fas.toml", CONFIG_DIR / "2fas.toml"]
 
 CONFIG_KEY = "tool.2fas"
+
+
+def _migrate_legacy_settings() -> None:
+    """
+    Move an older settings file to its current home, exactly once.
+
+    A move and not a copy: two files that both look authoritative is worse than one move
+    the user is told about.
+    """
+    if DEFAULT_SETTINGS.exists():
+        return
+
+    for previous in LEGACY_SETTINGS:
+        if not previous.is_file():
+            continue
+
+        try:
+            previous.replace(DEFAULT_SETTINGS)
+        except OSError as e:  # pragma: no cover
+            print(f"Could not move {previous} to {DEFAULT_SETTINGS}: {e}", file=sys.stderr)
+            return
+
+        print(f"Note: moved your 2fas settings from {previous} to {DEFAULT_SETTINGS}.", file=sys.stderr)
+        return
+
+
+config.mkdir(parents=True, exist_ok=True)
+CONFIG_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+_migrate_legacy_settings()
+DEFAULT_SETTINGS.touch(exist_ok=True)
 
 
 def expand_path(file: str | Path | None) -> str:
@@ -28,7 +65,7 @@ def expand_path(file: str | Path | None) -> str:
     return str(Path(file).expanduser().absolute())
 
 
-def expand_paths(paths: typing.Iterable[str]) -> list[str]:
+def expand_paths(paths: typing.Iterable[str | Path]) -> list[str]:
     """
     Expand multiple paths.
     """
@@ -38,12 +75,21 @@ def expand_paths(paths: typing.Iterable[str]) -> list[str]:
 @beautify
 class CliSettings(TypedConfig, singleton.Singleton):
     """
-    Class for the ~/.config/2fas.toml settings file.
+    Class for the ~/.config/2fas/config.toml settings file.
     """
 
     files: list[str] | None
     default_file: str | None
     auto_verbose: bool = False
+
+    # How your vault gets unlocked, and how often you are asked.
+    # Annotated as plain strings so configuraptor's type conversion is a no-op on the way
+    # to the TOML file; the values are `twofas.unlock.UnlockMethod` / `UnlockPolicy`, which
+    # are StrEnums and so survive that untouched. `parse_method`/`parse_policy` turn what
+    # is read back into the enum, tolerating anything unexpected.
+    unlock_method: str = "password"
+    password_unlock_policy: str = "os-session"
+    security_key_unlock_policy: str = "process"
 
     def add_file(self, filename: str | None, _config_file: str | Path = DEFAULT_SETTINGS) -> str | None:
         """
@@ -63,14 +109,16 @@ class CliSettings(TypedConfig, singleton.Singleton):
         self.files = expand_paths(files)
         return expand_path(filename)
 
-    def remove_file(self, filenames: str | typing.Iterable[str], _config_file: str | Path = DEFAULT_SETTINGS) -> None:
+    def remove_file(
+        self, filenames: str | Path | typing.Iterable[str], _config_file: str | Path = DEFAULT_SETTINGS
+    ) -> None:
         """
         Remove a known 2fas file from the config's history list.
         """
         if isinstance(filenames, str | Path):
-            filenames = [filenames]
-
-        filenames_to_remove = set(expand_paths(filenames))
+            filenames_to_remove = {expand_path(filenames)}
+        else:
+            filenames_to_remove = set(expand_paths(filenames))
         current_files = expand_paths(self.files or [])
         files = [_ for _ in current_files if _ not in filenames_to_remove]
 
