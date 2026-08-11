@@ -9,6 +9,8 @@ from src.twofas.unlock import (
     CachedKey,
     PolicyUnlocker,
     ProcessKeyCache,
+    UnlockMethod,
+    UnlockPolicy,
     parse_method,
     parse_policy,
     prune_keystore,
@@ -97,17 +99,44 @@ def unlocker_for(store: KeyStore, session: FakeSessionCache = None, **kwargs) ->
 
 
 def test_parse_method():
-    assert parse_method("security-key") == "security-key"
-    assert parse_method("PASSWORD") == "password"
-    assert parse_method(None) == "password"
-    assert parse_method("nonsense") == "password"
+    assert parse_method("security-key") is UnlockMethod.SECURITY_KEY
+    assert parse_method("PASSWORD") is UnlockMethod.PASSWORD
+    assert parse_method("security_key") is UnlockMethod.SECURITY_KEY  # underscores are forgiven
+    assert parse_method(None) is UnlockMethod.PASSWORD
+    assert parse_method("nonsense") is UnlockMethod.PASSWORD
 
 
 def test_parse_policy():
-    assert parse_policy("code", "process") == "code"
-    assert parse_policy("os_session", "process") == "os-session"  # underscores are forgiven
-    assert parse_policy("", "process") == "process"
-    assert parse_policy("nonsense", "os-session") == "os-session"
+    assert parse_policy("code", UnlockPolicy.PROCESS) is UnlockPolicy.CODE
+    assert parse_policy("os_session", UnlockPolicy.PROCESS) is UnlockPolicy.OS_SESSION
+    assert parse_policy("", UnlockPolicy.PROCESS) is UnlockPolicy.PROCESS
+    assert parse_policy("nonsense", UnlockPolicy.OS_SESSION) is UnlockPolicy.OS_SESSION
+
+
+def test_settings_round_trip_through_toml(tmp_path):
+    # the reason these were plain strings before: configuraptor runs values through type
+    # conversion on the way to the TOML file, and a mangled value would silently reset
+    # someone's unlock method. A StrEnum has to survive that untouched.
+    from configuraptor import Singleton
+
+    from src.twofas.cli_settings import get_cli_setting, set_cli_setting
+
+    config = tmp_path / "config.toml"
+    config.write_text("[tool.2fas]\n")
+
+    Singleton.clear()
+    set_cli_setting("unlock-method", UnlockMethod.SECURITY_KEY, config)
+    set_cli_setting("security-key-unlock-policy", UnlockPolicy.CODE, config)
+
+    assert 'unlock_method = "security-key"' in config.read_text()
+    assert 'security_key_unlock_policy = "code"' in config.read_text()
+
+    Singleton.clear()
+    assert parse_method(get_cli_setting("unlock-method", config)) is UnlockMethod.SECURITY_KEY
+    assert (
+        parse_policy(get_cli_setting("security-key-unlock-policy", config), UnlockPolicy.PROCESS) is UnlockPolicy.CODE
+    )
+    Singleton.clear()
 
 
 # --- vault identity ---
@@ -131,7 +160,7 @@ def test_vault_id_is_path_independent(tmp_path, salt):
 
 
 def test_cached_key_roundtrip():
-    cached = CachedKey(b"0" * 32, "security-key")
+    cached = CachedKey(b"0" * 32, UnlockMethod.SECURITY_KEY)
     assert CachedKey.decode(cached.encode()) == cached
 
     assert CachedKey.decode("nonsense") is None
@@ -142,7 +171,7 @@ def test_process_cache():
     cache = ProcessKeyCache()
     assert cache.get("x") is None
 
-    cache.put("x", CachedKey(b"1" * 32, "password"))
+    cache.put("x", CachedKey(b"1" * 32, UnlockMethod.PASSWORD))
     assert cache.get("x").key == b"1" * 32
 
     cache.drop("x")
@@ -364,7 +393,7 @@ def test_confirmation_touches_the_key_every_time(store, salt, key):
 
 def test_process_policy_ignores_a_key_another_run_left_behind(store, salt, key):
     # 'once per run' has to mean it, so the cross-process cache may not even be read.
-    cached = {vault_id_for(salt): CachedKey(key, "password")}
+    cached = {vault_id_for(salt): CachedKey(key, UnlockMethod.PASSWORD)}
     prompted: list[str] = []
 
     def counting_prompt(message: str) -> str:
@@ -389,7 +418,7 @@ def test_a_passphrase_cache_does_not_satisfy_the_security_key_method(store, salt
     # unlocking the vault, so switching the method looked like it did nothing at all.
     fake = FakeSecurityKey()
     enrolled_store(store, salt, key, fake)
-    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "password")})
+    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, UnlockMethod.PASSWORD)})
 
     unlocker = security_key_unlocker(store, fake, session, security_key_policy="os-session")
 
@@ -401,7 +430,7 @@ def test_a_passphrase_cache_does_not_satisfy_the_security_key_method(store, salt
 def test_a_security_key_cache_is_reused_under_os_session(store, salt, key):
     fake = FakeSecurityKey()
     enrolled_store(store, salt, key, fake)
-    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "security-key")})
+    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, UnlockMethod.SECURITY_KEY)})
 
     unlocker = security_key_unlocker(store, fake, session, security_key_policy="os-session")
 
@@ -412,7 +441,7 @@ def test_a_security_key_cache_is_reused_under_os_session(store, salt, key):
 def test_security_key_touches_every_run_under_process(store, salt, key):
     fake = FakeSecurityKey()
     enrolled_store(store, salt, key, fake)
-    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "security-key")})
+    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, UnlockMethod.SECURITY_KEY)})
 
     unlocker = security_key_unlocker(store, fake, session, security_key_policy="process")
 
@@ -428,7 +457,7 @@ def test_security_key_touches_every_run_under_process(store, salt, key):
 def test_unenrolled_vault_uses_the_passphrase_cache(store, salt, key):
     # method is security-key, but this particular vault has no key set up: the passphrase
     # is what will be used, so its cache is the right one to consult.
-    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "password")})
+    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, UnlockMethod.PASSWORD)})
 
     unlocker = security_key_unlocker(
         store, FakeSecurityKey(), session, password_policy="os-session", prompt=typed("would fail if asked")

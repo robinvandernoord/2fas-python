@@ -83,9 +83,10 @@ class CliSettings(TypedConfig, singleton.Singleton):
     auto_verbose: bool = False
 
     # How your vault gets unlocked, and how often you are asked.
-    # These are plain strings and not enums on purpose: `set_cli_setting` runs values
-    # through configuraptor's type conversion, and a str annotation makes that a no-op.
-    # See twofas.unlock for the accepted values and the validation.
+    # Annotated as plain strings so configuraptor's type conversion is a no-op on the way
+    # to the TOML file; the values are `twofas.unlock.UnlockMethod` / `UnlockPolicy`, which
+    # are StrEnums and so survive that untouched. `parse_method`/`parse_policy` turn what
+    # is read back into the enum, tolerating anything unexpected.
     unlock_method: str = "password"
     password_unlock_policy: str = "os-session"
     security_key_unlock_policy: str = "process"

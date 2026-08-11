@@ -5,7 +5,12 @@ import pytest
 from configuraptor import Singleton
 from configuraptor.errors import ConfigErrorExtraKey
 
-from src.twofas.cli_settings import expand_path, get_cli_setting, load_cli_settings, set_cli_setting
+from src.twofas.cli_settings import (
+    expand_path,
+    get_cli_setting,
+    load_cli_settings,
+    set_cli_setting,
+)
 
 
 @pytest.fixture()

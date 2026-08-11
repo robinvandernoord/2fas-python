@@ -7,9 +7,8 @@ import typing
 
 import configuraptor
 import questionary
-from prompt_toolkit.key_binding import KeyBindings
 from configuraptor import beautify, postpone
-from typing_extensions import Never
+from prompt_toolkit.key_binding import KeyBindings
 
 from .cli_settings import CliSettings
 from .unlock import PolicyUnlocker
@@ -72,7 +71,7 @@ def clear(
 
 
 @clear
-def exit_with_clear(status_code: int) -> Never:  # pragma: no cover
+def exit_with_clear(status_code: int) -> typing.Never:  # pragma: no cover
     """
     First clear the screen with the @clear decorator, then exit with a specific exit code.
     """

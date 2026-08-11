@@ -13,7 +13,7 @@ import typer
 from lib2fas import TwoFactorAuthDetails, TwoFactorStorage, load_services
 from rich.markup import escape
 
-from . import security_key
+from . import install, security_key
 from .__about__ import __version__
 from .cli_settings import (
     expand_path,
@@ -30,7 +30,6 @@ from .cli_support import (
     menu,
     state,
 )
-from . import install
 from .install import detect_install_plan, run_install
 from .keystore import KeyStore, vault_id_for
 from .unlock import (
@@ -52,8 +51,8 @@ TwoFactorDetailStorage: typing.TypeAlias = TwoFactorStorage[TwoFactorAuthDetails
 # 'security-key' is the setting value; "security key" is how the menus say it, where it
 # has to be self-explanatory. Neither mentions a brand: any FIDO2 authenticator works.
 METHOD_LABELS: dict[UnlockMethod, str] = {
-    "password": "Passphrase",
-    "security-key": "Security key, with your passphrase as fallback",
+    UnlockMethod.PASSWORD: "Passphrase",
+    UnlockMethod.SECURITY_KEY: "Security key, with your passphrase as fallback",
 }
 
 
@@ -405,11 +404,13 @@ def command_enroll(filename: str) -> None:
         rich.print(f"[red]Setup failed: {escape(str(e))}[/red]")
         return
 
-    set_cli_setting("unlock-method", "security-key")
+    set_cli_setting("unlock-method", UnlockMethod.SECURITY_KEY)
+    policy = parse_policy(get_cli_setting("security-key-unlock-policy"), UnlockPolicy.PROCESS)
+
     rich.print(f"[green]Your security key can now unlock {active_file}.[/green]")
     rich.print(
-        f"Unlock method is now [blue]security-key[/blue] "
-        f"([blue]{POLICY_HELP[parse_policy(get_cli_setting('security-key-unlock-policy'), 'process')]}[/blue]). "
+        f"Unlock method is now [blue]{UnlockMethod.SECURITY_KEY}[/blue] "
+        f"([blue]{POLICY_HELP[policy]}[/blue]). "
         "Your passphrase keeps working, and `2fas --password` skips the key for one run."
     )
 
@@ -430,8 +431,8 @@ def command_forget_key(filename: str) -> None:
     else:
         rich.print(f"[yellow]No security key was enrolled for {filename}.[/yellow]")
 
-    if parse_method(get_cli_setting("unlock-method")) == "security-key":
-        set_cli_setting("unlock-method", "password")
+    if parse_method(get_cli_setting("unlock-method")) == UnlockMethod.SECURITY_KEY:
+        set_cli_setting("unlock-method", UnlockMethod.PASSWORD)
         rich.print("Unlock method set back to [blue]password[/blue].")
 
 
@@ -612,7 +613,7 @@ def choose_unlock_method(filename: str) -> None:
         generate_choices(
             {f"{label}{' (current)' if value == current else ''}": value for value, label in METHOD_LABELS.items()},
             with_exit=False,
-            disabled=({} if is_set_up else {"security-key": "Set up a security key for this file first"}),
+            disabled=({} if is_set_up else {UnlockMethod.SECURITY_KEY: "Set up a security key for this file first"}),
         ),
         current=current,
     )
@@ -629,23 +630,24 @@ def choose_unlock_policy(filename: str, method: UnlockMethod) -> None:
     """
     Menu for how often one of the two paths should ask for something.
     """
-    setting = "security-key-unlock-policy" if method == "security-key" else "password-unlock-policy"
-    default: UnlockPolicy = "process" if method == "security-key" else "os-session"
+    is_key = method == UnlockMethod.SECURITY_KEY
+    setting = "security-key-unlock-policy" if is_key else "password-unlock-policy"
+    default = UnlockPolicy.PROCESS if is_key else UnlockPolicy.OS_SESSION
     current = parse_policy(getattr(state.settings, setting.replace("-", "_")), default)
 
     # what a tighter policy actually costs you differs enormously between the two paths:
     # a touch is a second, a master passphrase is not.
     costs: dict[UnlockPolicy, str] = (
         {
-            "os-session": "one touch per boot",
-            "process": "one touch per run of 2fas (recommended)",
-            "code": "one touch for every code",
+            UnlockPolicy.OS_SESSION: "one touch per boot",
+            UnlockPolicy.PROCESS: "one touch per run of 2fas (recommended)",
+            UnlockPolicy.CODE: "one touch for every code",
         }
-        if method == "security-key"
+        if is_key
         else {
-            "os-session": "type it once per boot (recommended)",
-            "process": "type it once per run of 2fas",
-            "code": "type it for every single code - realistically unusable",
+            UnlockPolicy.OS_SESSION: "type it once per boot (recommended)",
+            UnlockPolicy.PROCESS: "type it once per run of 2fas",
+            UnlockPolicy.CODE: "type it for every single code - realistically unusable",
         }
     )
 
@@ -686,8 +688,8 @@ def command_security(filename: str) -> None:
     method = parse_method(state.settings.unlock_method)
     is_set_up = is_security_key_set_up(filename)
 
-    password_policy = parse_policy(state.settings.password_unlock_policy, "os-session")
-    security_key_policy = parse_policy(state.settings.security_key_unlock_policy, "process")
+    password_policy = parse_policy(state.settings.password_unlock_policy, UnlockPolicy.OS_SESSION)
+    security_key_policy = parse_policy(state.settings.security_key_unlock_policy, UnlockPolicy.PROCESS)
 
     rich.print(f"Active file:    [blue]{filename}[/blue]")
     rich.print(f"Unlock method:  [blue]{METHOD_LABELS[method]}[/blue]")
@@ -727,9 +729,9 @@ def command_security(filename: str) -> None:
         case "unlock-method":
             return choose_unlock_method(filename)
         case "password-policy":
-            return choose_unlock_policy(filename, "password")
+            return choose_unlock_policy(filename, UnlockMethod.PASSWORD)
         case "touch-policy":
-            return choose_unlock_policy(filename, "security-key")
+            return choose_unlock_policy(filename, UnlockMethod.SECURITY_KEY)
         case "back" | None:
             return command_settings(filename)
         case _:

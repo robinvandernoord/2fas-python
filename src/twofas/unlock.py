@@ -31,6 +31,7 @@ can not pull a code - and not protection of the key material.
 
 import base64
 import contextlib
+import enum
 import getpass
 import sys
 import typing as t
@@ -42,27 +43,44 @@ import pyjson5
 import rich
 from keyring.errors import KeyringError
 from rich.markup import escape
-from typing_extensions import Self
 
+from . import security_key
 from .cli_settings import CliSettings
 from .keystore import KeyStore, WrappedKey, new_wrapped_key, vault_id_for
-from . import security_key
 from .security_key import SecurityKeyError
 
-UnlockMethod = t.Literal["password", "security-key"]
-UnlockPolicy = t.Literal["os-session", "process", "code"]
 
-UNLOCK_METHODS: tuple[UnlockMethod, ...] = t.get_args(UnlockMethod)
-UNLOCK_POLICIES: tuple[UnlockPolicy, ...] = t.get_args(UnlockPolicy)
+class UnlockMethod(enum.StrEnum):
+    """
+    How your vault gets unlocked.
 
-DEFAULT_METHOD: UnlockMethod = "password"
-DEFAULT_PASSWORD_POLICY: UnlockPolicy = "os-session"
-DEFAULT_SECURITY_KEY_POLICY: UnlockPolicy = "process"
+    StrEnum and not a plain str: the value is what ends up in the TOML file and in the
+    keyring, so it has to stay a string, but everything in the code should be spelling it
+    once rather than repeating a literal.
+    """
+
+    PASSWORD = "password"
+    SECURITY_KEY = "security-key"
+
+
+class UnlockPolicy(enum.StrEnum):
+    """
+    How often you are asked.
+    """
+
+    OS_SESSION = "os-session"
+    PROCESS = "process"
+    CODE = "code"
+
+
+DEFAULT_METHOD = UnlockMethod.PASSWORD
+DEFAULT_PASSWORD_POLICY = UnlockPolicy.OS_SESSION
+DEFAULT_SECURITY_KEY_POLICY = UnlockPolicy.PROCESS
 
 POLICY_HELP: dict[UnlockPolicy, str] = {
-    "os-session": "once per boot",
-    "process": "once per run of 2fas",
-    "code": "every single code",
+    UnlockPolicy.OS_SESSION: "once per boot",
+    UnlockPolicy.PROCESS: "once per run of 2fas",
+    UnlockPolicy.CODE: "every single code",
 }
 
 # keyring username namespace for cached keys; kept separate from lib2fas' own
@@ -74,13 +92,13 @@ def parse_method(value: t.Any, fallback: UnlockMethod = DEFAULT_METHOD) -> Unloc
     """
     Validate an `unlock-method` setting, complaining once instead of crashing.
     """
-    text = str(value or "").strip().lower()
-    if text in UNLOCK_METHODS:
-        return text
-
-    if text:
-        print(f"Unknown unlock-method '{text}', falling back to '{fallback}'.", file=sys.stderr)
-    return fallback
+    text = str(value or "").strip().lower().replace("_", "-")
+    try:
+        return UnlockMethod(text)
+    except ValueError:
+        if text:
+            print(f"Unknown unlock-method '{text}', falling back to '{fallback}'.", file=sys.stderr)
+        return fallback
 
 
 def parse_policy(value: t.Any, fallback: UnlockPolicy) -> UnlockPolicy:
@@ -88,12 +106,12 @@ def parse_policy(value: t.Any, fallback: UnlockPolicy) -> UnlockPolicy:
     Validate an unlock policy setting, complaining once instead of crashing.
     """
     text = str(value or "").strip().lower().replace("_", "-")
-    if text in UNLOCK_POLICIES:
-        return text
-
-    if text:
-        print(f"Unknown unlock policy '{text}', falling back to '{fallback}'.", file=sys.stderr)
-    return fallback
+    try:
+        return UnlockPolicy(text)
+    except ValueError:
+        if text:
+            print(f"Unknown unlock policy '{text}', falling back to '{fallback}'.", file=sys.stderr)
+        return fallback
 
 
 def vault_salt(filename: str | Path) -> bytes | None:
@@ -145,17 +163,17 @@ class CachedKey(t.NamedTuple):
         return f"{self.via}:{base64.b64encode(self.key).decode()}"
 
     @classmethod
-    def decode(cls, raw: str) -> Self | None:
+    def decode(cls, raw: str) -> t.Self | None:
         """
         Parse `encode()` output, returning None if it is not intelligible.
         """
         via, _, encoded = raw.partition(":")
-        if via not in UNLOCK_METHODS or not encoded:
+        if not encoded:
             return None
 
         try:
-            return cls(base64.b64decode(encoded), via)
-        except (ValueError, TypeError):  # pragma: no cover
+            return cls(base64.b64decode(encoded), UnlockMethod(via))
+        except (ValueError, TypeError):
             return None
 
 
@@ -365,7 +383,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         self._vault: tuple[str, bytes, str] | None = None  # (filename, salt, vault_id)
 
     @classmethod
-    def from_settings(cls, settings: CliSettings, force_password: bool = False) -> Self:
+    def from_settings(cls, settings: CliSettings, force_password: bool = False) -> t.Self:
         """
         Build an unlocker from the user's config file.
         """
@@ -388,17 +406,17 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         """
         The policy governing the path we are actually on.
         """
-        path = self.used_path or ("password" if self.force_password else self.method)
+        path = self.used_path or (UnlockMethod.PASSWORD if self.force_password else self.method)
         return self.policy_for(path)
 
     def policy_for(self, path: UnlockMethod) -> UnlockPolicy:
         """
         The policy governing one specific path, regardless of which one we are on.
         """
-        return self.security_key_policy if path == "security-key" else self.password_policy
+        return self.security_key_policy if path == UnlockMethod.SECURITY_KEY else self.password_policy
 
     def _may_persist(self) -> bool:
-        return self.effective_policy() == "os-session"
+        return self.effective_policy() == UnlockPolicy.OS_SESSION
 
     def intended_path(self, vault_id: str) -> UnlockMethod:
         """
@@ -407,10 +425,10 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         Falls back to the passphrase when the security key is configured but this
         particular vault has no key set up, since that is what would happen anyway.
         """
-        if self.force_password or self.method != "security-key":
-            return "password"
+        if self.force_password or self.method != UnlockMethod.SECURITY_KEY:
+            return UnlockMethod.PASSWORD
 
-        return "security-key" if self.store.get(vault_id) else "password"
+        return UnlockMethod.SECURITY_KEY if self.store.get(vault_id) else UnlockMethod.PASSWORD
 
     def _cached(self, vault_id: str) -> CachedKey | None:
         """
@@ -430,7 +448,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         if (cached := self.process_cache.get(vault_id)) and cached.via == intended:
             return cached
 
-        if self.policy_for(intended) != "os-session":
+        if self.policy_for(intended) != UnlockPolicy.OS_SESSION:
             return None
 
         if (cached := self.session_cache.get(vault_id)) and cached.via == intended:
@@ -473,7 +491,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         self.session_cache.drop(vault_id)
         self.keyring_manager.delete_credentials(filename)
 
-        if self.used_path == "security-key":
+        if self.used_path == UnlockMethod.SECURITY_KEY:
             print("The key stored for your security key did not fit this vault; removing it.", file=sys.stderr)
             self.store.delete(vault_id)
             self.force_password = True
@@ -506,7 +524,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         """
         Unwrap this vault's key with the enrolled security key, or None to fall back.
         """
-        if self.force_password or self.method != "security-key":
+        if self.force_password or self.method != UnlockMethod.SECURITY_KEY:
             return None
 
         if not (wrapped := self.store.get(vault_id)):
@@ -521,7 +539,8 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
                 announce=announce_touch,
             )
             return CachedKey(
-                self.backend.unwrap_key(secret, vault_id, wrapped.nonce, wrapped.ciphertext), "security-key"
+                self.backend.unwrap_key(secret, vault_id, wrapped.nonce, wrapped.ciphertext),
+                UnlockMethod.SECURITY_KEY,
             )
         except SecurityKeyError as e:
             rich.print(
@@ -536,13 +555,13 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         # the keyring passphrase item is only consulted under 'os-session'; the tighter
         # policies mean "ask me", and reading a stored passphrase would not be asking.
         passphrase = None
-        if self.password_policy == "os-session":
+        if self.password_policy == UnlockPolicy.OS_SESSION:
             passphrase = self.keyring_manager.retrieve_credentials(filename)
 
         if not passphrase:
             passphrase = self.prompt(f"Passphrase for '{filename}'? ")
 
-        return CachedKey(lib2fas.derive_key(passphrase, salt), "password")
+        return CachedKey(lib2fas.derive_key(passphrase, salt), UnlockMethod.PASSWORD)
 
     # --- per-code confirmation ---
 
@@ -550,7 +569,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         """
         Whether the `code` policy applies to the path we are on.
         """
-        return self.effective_policy() == "code"
+        return self.effective_policy() == UnlockPolicy.CODE
 
     def confirm(self) -> bool:
         """
@@ -571,7 +590,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         filename, salt, vault_id = self._vault
 
         try:
-            if self.used_path == "security-key":
+            if self.used_path == UnlockMethod.SECURITY_KEY:
                 fresh = self._confirm_with_security_key(vault_id)
             else:
                 fresh = lib2fas.derive_key(self.prompt(f"Passphrase for '{filename}'? "), salt)
