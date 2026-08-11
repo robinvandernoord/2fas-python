@@ -2,6 +2,11 @@
 
 <!--next-version-placeholder-->
 
+## v1.2.0 (2026-08-11)
+
+### Feature
+* **unlocking:** add passphrase and FIDO2 security-key vault unlocking
+
 ## v1.1.1 (2026-01-14)
 
 ### Documentation
