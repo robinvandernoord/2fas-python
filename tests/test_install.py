@@ -1,7 +1,7 @@
 import sys
 
 import pytest
-from rich.markup import render
+from rich.markup import escape, render
 
 from src.twofas.cli import METHOD_LABELS, is_security_key_set_up
 from src.twofas.cli_support import generate_choices
@@ -50,8 +50,6 @@ def test_install_plan_never_uses_a_shell():
 
 def test_extra_name_survives_rich_markup():
     # `[security-key]` looks like a rich style tag, which silently swallowed it before.
-    from rich.markup import escape
-
     assert render(escape(EXTRA_NAME)).plain == "2fas[security-key]"
     assert render(EXTRA_NAME).plain != "2fas[security-key]"  # the bug, kept as a regression guard
 

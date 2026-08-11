@@ -33,23 +33,27 @@ import base64
 import contextlib
 import getpass
 import sys
-import typing
+import typing as t
 from pathlib import Path
 
+import keyring
 import lib2fas
 import pyjson5
 import rich
+from keyring.errors import KeyringError
 from rich.markup import escape
+from typing_extensions import Self
 
 from .cli_settings import CliSettings
 from .keystore import KeyStore, WrappedKey, new_wrapped_key, vault_id_for
+from . import security_key
 from .security_key import SecurityKeyError
 
-UnlockMethod = typing.Literal["password", "security-key"]
-UnlockPolicy = typing.Literal["os-session", "process", "code"]
+UnlockMethod = t.Literal["password", "security-key"]
+UnlockPolicy = t.Literal["os-session", "process", "code"]
 
-UNLOCK_METHODS: tuple[UnlockMethod, ...] = ("password", "security-key")
-UNLOCK_POLICIES: tuple[UnlockPolicy, ...] = ("os-session", "process", "code")
+UNLOCK_METHODS: tuple[UnlockMethod, ...] = t.get_args(UnlockMethod)
+UNLOCK_POLICIES: tuple[UnlockPolicy, ...] = t.get_args(UnlockPolicy)
 
 DEFAULT_METHOD: UnlockMethod = "password"
 DEFAULT_PASSWORD_POLICY: UnlockPolicy = "os-session"
@@ -66,7 +70,7 @@ POLICY_HELP: dict[UnlockPolicy, str] = {
 KEY_ITEM_PREFIX = "key:"
 
 
-def parse_method(value: typing.Any, fallback: UnlockMethod = DEFAULT_METHOD) -> UnlockMethod:
+def parse_method(value: t.Any, fallback: UnlockMethod = DEFAULT_METHOD) -> UnlockMethod:
     """
     Validate an `unlock-method` setting, complaining once instead of crashing.
     """
@@ -79,7 +83,7 @@ def parse_method(value: typing.Any, fallback: UnlockMethod = DEFAULT_METHOD) -> 
     return fallback
 
 
-def parse_policy(value: typing.Any, fallback: UnlockPolicy) -> UnlockPolicy:
+def parse_policy(value: t.Any, fallback: UnlockPolicy) -> UnlockPolicy:
     """
     Validate an unlock policy setting, complaining once instead of crashing.
     """
@@ -112,7 +116,7 @@ def vault_salt(filename: str | Path) -> bytes | None:
         return None
 
 
-def prune_keystore(store: KeyStore, known_files: typing.Iterable[str]) -> list[WrappedKey]:
+def prune_keystore(store: KeyStore, known_files: t.Iterable[str]) -> list[WrappedKey]:
     """
     Drop wrapped keys that can no longer belong to any vault this installation knows.
 
@@ -126,7 +130,7 @@ def prune_keystore(store: KeyStore, known_files: typing.Iterable[str]) -> list[W
     return store.prune(live)
 
 
-class CachedKey(typing.NamedTuple):
+class CachedKey(t.NamedTuple):
     """
     A derived vault key plus a note of which path produced it.
     """
@@ -141,7 +145,7 @@ class CachedKey(typing.NamedTuple):
         return f"{self.via}:{base64.b64encode(self.key).decode()}"
 
     @classmethod
-    def decode(cls, raw: str) -> "CachedKey | None":
+    def decode(cls, raw: str) -> Self | None:
         """
         Parse `encode()` output, returning None if it is not intelligible.
         """
@@ -185,7 +189,54 @@ class ProcessKeyCache:
         self._keys.pop(vault_id, None)
 
 
-class SessionKeyCache:
+class SessionCacheProtocol(t.Protocol):
+    """
+    Where a derived key lives between runs of 2fas, if anywhere.
+    """
+
+    def get(self, vault_id: str) -> "CachedKey | None":
+        """
+        Look up a key an earlier run left behind.
+        """
+
+    def put(self, vault_id: str, cached: "CachedKey") -> None:
+        """
+        Leave a key for the next run.
+        """
+
+    def drop(self, vault_id: str) -> None:
+        """
+        Forget one key.
+        """
+
+
+class NoSessionCache(SessionCacheProtocol):
+    """
+    Stand-in for when there is no login keyring to scope anything to.
+
+    `os-session` then degrades to `process`: there is nowhere to remember a key across
+    runs, so we simply do not. Having this as a class rather than a special case keeps the
+    'is there a keyring' question in one place - and gives tests something to inject.
+    """
+
+    def get(self, vault_id: str) -> "CachedKey | None":  # noqa: ARG002 - part of the protocol
+        """
+        Nothing is ever stored, so nothing is ever found.
+        """
+        return None
+
+    def put(self, vault_id: str, cached: "CachedKey") -> None:
+        """
+        Deliberately does nothing.
+        """
+
+    def drop(self, vault_id: str) -> None:
+        """
+        Deliberately does nothing.
+        """
+
+
+class SessionKeyCache(SessionCacheProtocol):
     """
     Holds derived keys in the login keyring, scoped to the current OS session.
 
@@ -199,9 +250,6 @@ class SessionKeyCache:
         """
         The current OS session's keyring service name, or None if there is no keyring.
         """
-        # a DummyKeyringManager (no keyring backend available) has no appname, in which
-        # case there is nothing session-scoped to write to and 'os-session' degrades to
-        # 'process'.
         return getattr(lib2fas.keyring_manager, "appname", "") or None
 
     def get(self, vault_id: str) -> CachedKey | None:
@@ -210,9 +258,6 @@ class SessionKeyCache:
         """
         if not (service := self.service()):
             return None
-
-        import keyring
-        from keyring.errors import KeyringError
 
         try:
             raw = keyring.get_password(service, KEY_ITEM_PREFIX + vault_id)
@@ -229,9 +274,6 @@ class SessionKeyCache:
         if not (service := self.service()):
             return
 
-        import keyring
-        from keyring.errors import KeyringError
-
         try:
             keyring.set_password(service, KEY_ITEM_PREFIX + vault_id, cached.encode())
         except KeyringError as e:  # pragma: no cover
@@ -244,12 +286,20 @@ class SessionKeyCache:
         if not (service := self.service()):
             return
 
-        import keyring
-        from keyring.errors import KeyringError
-
         # nothing to delete is not a problem:
         with contextlib.suppress(KeyringError):
             keyring.delete_password(service, KEY_ITEM_PREFIX + vault_id)
+
+
+def default_session_cache() -> SessionCacheProtocol:
+    """
+    A keyring-backed cache, or a do-nothing one when there is no keyring.
+
+    A DummyKeyringManager (which is what lib2fas falls back to when no backend is
+    available) has no session name to scope items to, so there is nothing to write to and
+    `os-session` degrades to `process`.
+    """
+    return SessionKeyCache() if getattr(lib2fas.keyring_manager, "appname", "") else NoSessionCache()
 
 
 class PolicyUnlocker(lib2fas.UnlockerProtocol):
@@ -281,6 +331,10 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         force_password: bool = False,
         store: KeyStore = None,
         touch_timeout: float = None,
+        session_cache: SessionCacheProtocol = None,
+        keyring_manager: lib2fas.KeyringManagerProtocol = None,
+        prompt: t.Callable[[str], str] = None,
+        backend: t.Any = None,
     ) -> None:
         """
         Args:
@@ -288,22 +342,30 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
             password_policy: how often to ask for the passphrase.
             security_key_policy: how often to ask for a touch.
             force_password: skip the security key entirely (the `--password` escape hatch).
-            store: where wrapped keys live; overridable for tests.
+            store: where wrapped keys live.
             touch_timeout: seconds to wait for a touch.
+            session_cache: where keys are kept across runs of 2fas.
+            keyring_manager: where lib2fas keeps passphrases from earlier versions.
+            prompt: how to ask for the passphrase.
+            backend: what talks to the security key; a stand-in makes this testable
+                without hardware.
         """
         self.method = method
         self.password_policy = password_policy
         self.security_key_policy = security_key_policy
         self.force_password = force_password
-        self.store = store if store is not None else KeyStore()
+        self.store = store or KeyStore()
         self.touch_timeout = touch_timeout
+        self.keyring_manager = keyring_manager or lib2fas.keyring_manager
+        self.prompt = prompt or getpass.getpass
+        self.backend = backend or security_key
 
         self.process_cache = ProcessKeyCache()
-        self.session_cache = SessionKeyCache()
+        self.session_cache = session_cache or default_session_cache()
         self._vault: tuple[str, bytes, str] | None = None  # (filename, salt, vault_id)
 
     @classmethod
-    def from_settings(cls, settings: CliSettings, force_password: bool = False) -> "PolicyUnlocker":
+    def from_settings(cls, settings: CliSettings, force_password: bool = False) -> Self:
         """
         Build an unlocker from the user's config file.
         """
@@ -315,17 +377,6 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         )
 
     # --- policy ---
-
-    def _import_backend(self) -> typing.Any:
-        """
-        Import the security key backend lazily.
-
-        Lazily because `fido2` is an optional dependency, and as a method because it is
-        the seam tests use to stand in for hardware.
-        """
-        from . import security_key
-
-        return security_key
 
     def vault(self) -> tuple[str, bytes, str] | None:
         """
@@ -420,7 +471,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         vault_id = vault_id_for(salt)
         self.process_cache.drop(vault_id)
         self.session_cache.drop(vault_id)
-        lib2fas.keyring_manager.delete_credentials(filename)
+        self.keyring_manager.delete_credentials(filename)
 
         if self.used_path == "security-key":
             print("The key stored for your security key did not fit this vault; removing it.", file=sys.stderr)
@@ -434,7 +485,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         """
         Drop keyring items (passphrases and cached keys) from previous OS sessions.
         """
-        return lib2fas.keyring_manager.cleanup_keyring()
+        return self.keyring_manager.cleanup_keyring()
 
     # --- the two paths ---
 
@@ -462,16 +513,16 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
             rich.print("[yellow]No security key is set up for this vault " "(run `2fas --setup-key`).[/yellow]")
             return None
 
-        backend = self._import_backend()
-
         try:
-            secret = backend.evaluate_hmac_secret(
+            secret = self.backend.evaluate_hmac_secret(
                 wrapped.credential_id,
                 wrapped.hmac_salt,
-                timeout=self.touch_timeout or backend.DEFAULT_TIMEOUT,
+                timeout=self.touch_timeout or self.backend.DEFAULT_TIMEOUT,
                 announce=announce_touch,
             )
-            return CachedKey(backend.unwrap_key(secret, vault_id, wrapped.nonce, wrapped.ciphertext), "security-key")
+            return CachedKey(
+                self.backend.unwrap_key(secret, vault_id, wrapped.nonce, wrapped.ciphertext), "security-key"
+            )
         except SecurityKeyError as e:
             rich.print(
                 f"[yellow]Security key unavailable ({escape(str(e))}) - " "falling back to your passphrase.[/yellow]"
@@ -486,10 +537,10 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         # policies mean "ask me", and reading a stored passphrase would not be asking.
         passphrase = None
         if self.password_policy == "os-session":
-            passphrase = lib2fas.keyring_manager.retrieve_credentials(filename)
+            passphrase = self.keyring_manager.retrieve_credentials(filename)
 
         if not passphrase:
-            passphrase = getpass.getpass(f"Passphrase for '{filename}'? ")
+            passphrase = self.prompt(f"Passphrase for '{filename}'? ")
 
         return CachedKey(lib2fas.derive_key(passphrase, salt), "password")
 
@@ -523,7 +574,7 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
             if self.used_path == "security-key":
                 fresh = self._confirm_with_security_key(vault_id)
             else:
-                fresh = lib2fas.derive_key(getpass.getpass(f"Passphrase for '{filename}'? "), salt)
+                fresh = lib2fas.derive_key(self.prompt(f"Passphrase for '{filename}'? "), salt)
         except SecurityKeyError as e:
             rich.print(f"[red]Could not confirm with your security key: {escape(str(e))}[/red]")
             return False
@@ -539,15 +590,13 @@ class PolicyUnlocker(lib2fas.UnlockerProtocol):
         if wrapped is None:  # pragma: no cover
             raise SecurityKeyError("The enrolment for this vault disappeared.")
 
-        backend = self._import_backend()
-
-        secret = backend.evaluate_hmac_secret(
+        secret = self.backend.evaluate_hmac_secret(
             wrapped.credential_id,
             wrapped.hmac_salt,
-            timeout=self.touch_timeout or backend.DEFAULT_TIMEOUT,
+            timeout=self.touch_timeout or self.backend.DEFAULT_TIMEOUT,
             announce=announce_touch,
         )
-        return typing.cast(bytes, backend.unwrap_key(secret, vault_id, wrapped.nonce, wrapped.ciphertext))
+        return t.cast(bytes, self.backend.unwrap_key(secret, vault_id, wrapped.nonce, wrapped.ciphertext))
 
 
 def announce_touch() -> None:
@@ -586,9 +635,7 @@ def enroll(
     Raises:
         SecurityKeyError: and subclasses.
     """
-    from . import security_key
-
-    store = store if store is not None else KeyStore()
+    store = store or KeyStore()
     timeout = timeout or security_key.DEFAULT_TIMEOUT
     vault_id = vault_id_for(salt)
 

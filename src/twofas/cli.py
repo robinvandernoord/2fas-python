@@ -49,29 +49,26 @@ app = typer.Typer()
 
 TwoFactorDetailStorage: typing.TypeAlias = TwoFactorStorage[TwoFactorAuthDetails]
 
-# 'security-key' is the setting value (and works for any FIDO2 key, not only YubiKeys);
-# "security key" is what it is called in the menus, where it needs to be self-explanatory.
+# 'security-key' is the setting value; "security key" is how the menus say it, where it
+# has to be self-explanatory. Neither mentions a brand: any FIDO2 authenticator works.
 METHOD_LABELS: dict[UnlockMethod, str] = {
     "password": "Passphrase",
     "security-key": "Security key, with your passphrase as fallback",
 }
-
-_unlocker: PolicyUnlocker | None = None
 
 
 def get_unlocker(force_password: bool = False) -> PolicyUnlocker:
     """
     The unlocker for this invocation, built once from the user's settings.
 
-    It is a single instance on purpose: it remembers which path actually unlocked the
-    vault, which is what the per-code policy follows.
+    One instance per run on purpose: it remembers which path actually unlocked the vault,
+    which is what the per-code policy follows. It lives on `state` next to the settings,
+    rather than in a module-level global.
     """
-    global _unlocker  # one unlocker per invocation, by design
+    if state.unlocker is None:
+        state.unlocker = PolicyUnlocker.from_settings(state.settings, force_password=force_password)
 
-    if _unlocker is None:
-        _unlocker = PolicyUnlocker.from_settings(state.settings, force_password=force_password)
-
-    return _unlocker
+    return state.unlocker
 
 
 def prepare_to_generate(filename: str = None) -> TwoFactorDetailStorage | None:
@@ -306,8 +303,7 @@ def is_security_key_set_up(filename: str, store: KeyStore = None) -> bool:
     if not (salt := vault_salt(filename)):
         return False
 
-    store = store if store is not None else KeyStore()
-    return store.get(vault_id_for(salt)) is not None
+    return (store or KeyStore()).get(vault_id_for(salt)) is not None
 
 
 def ensure_fido2(interactive: bool = True) -> bool:
@@ -443,8 +439,9 @@ def _hidraw_diagnosis() -> str:
     """
     Say in one clause why no authenticator was visible.
 
-    On Linux the answer is almost always udev, so that case names the fix; the others just
-    say what is true and leave it there.
+    /dev/hidraw* are the raw USB HID device nodes, which is how a security key is spoken to;
+    if udev has not granted your user access to them, the key is invisible to 2fas however
+    firmly it is plugged in. That is the usual cause on Linux, so that case names the fix.
     """
     if not sys.platform.startswith("linux"):
         return "none found"

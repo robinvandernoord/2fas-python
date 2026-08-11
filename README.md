@@ -41,7 +41,7 @@ You can run `2fas --all` to generate codes for all TOTP in your `.2fas` file.
 
 The `--settings`, `--setting` or `-s` flag can be used to read/write settings.
 This can also be done from within the interactive menu.
-`2fas` cli settings are stored in `~/.config/2fas/2fas.toml` and contain the following settings:
+`2fas` cli settings are stored in `~/.config/2fas/config.toml` and contain the following settings:
 
 ```toml
 [tool.2fas]
@@ -58,9 +58,9 @@ security_key_unlock_policy = "process" # how often to ask for a touch
 
 ```
 
-If you still have a settings file at the old location (`~/.config/2fas.toml`), it is moved
-into the new directory the first time you run `2fas`. The directory also holds
-`keys/`, used by the security key support below.
+If your settings file is still at an older location (`~/.config/2fas.toml`), it is moved
+into place the first time you run `2fas`. The directory also holds `keys/`, used by the
+security key support below.
 
 ## Unlocking your vault
 

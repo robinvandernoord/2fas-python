@@ -16,30 +16,37 @@ config = Path("~/.config").expanduser()
 # 2fas used to be a single file (~/.config/2fas.toml), but it now also stores per-vault
 # blobs (wrapped keys), which do not belong in a settings file. Hence a directory.
 CONFIG_DIR = config / "2fas"
-LEGACY_SETTINGS = config / "2fas.toml"
-DEFAULT_SETTINGS = CONFIG_DIR / "2fas.toml"
+DEFAULT_SETTINGS = CONFIG_DIR / "config.toml"
 KEYS_DIR = CONFIG_DIR / "keys"
+
+# every path this settings file has previously lived at, oldest first:
+LEGACY_SETTINGS = [config / "2fas.toml", CONFIG_DIR / "2fas.toml"]
 
 CONFIG_KEY = "tool.2fas"
 
 
 def _migrate_legacy_settings() -> None:
     """
-    Move ~/.config/2fas.toml into the new config directory, exactly once.
+    Move an older settings file to its current home, exactly once.
 
-    A move and not a copy: two files that both look authoritative is worse than one
-    move the user is told about.
+    A move and not a copy: two files that both look authoritative is worse than one move
+    the user is told about.
     """
-    if DEFAULT_SETTINGS.exists() or not LEGACY_SETTINGS.is_file():
+    if DEFAULT_SETTINGS.exists():
         return
 
-    try:
-        LEGACY_SETTINGS.replace(DEFAULT_SETTINGS)
-    except OSError as e:  # pragma: no cover
-        print(f"Could not move {LEGACY_SETTINGS} to {DEFAULT_SETTINGS}: {e}", file=sys.stderr)
-        return
+    for previous in LEGACY_SETTINGS:
+        if not previous.is_file():
+            continue
 
-    print(f"Note: moved your 2fas settings from {LEGACY_SETTINGS} to {DEFAULT_SETTINGS}.", file=sys.stderr)
+        try:
+            previous.replace(DEFAULT_SETTINGS)
+        except OSError as e:  # pragma: no cover
+            print(f"Could not move {previous} to {DEFAULT_SETTINGS}: {e}", file=sys.stderr)
+            return
+
+        print(f"Note: moved your 2fas settings from {previous} to {DEFAULT_SETTINGS}.", file=sys.stderr)
+        return
 
 
 config.mkdir(parents=True, exist_ok=True)
@@ -68,7 +75,7 @@ def expand_paths(paths: typing.Iterable[str]) -> list[str]:
 @beautify
 class CliSettings(TypedConfig, singleton.Singleton):
     """
-    Class for the ~/.config/2fas/2fas.toml settings file.
+    Class for the ~/.config/2fas/config.toml settings file.
     """
 
     files: list[str] | None

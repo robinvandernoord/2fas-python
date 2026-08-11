@@ -39,14 +39,58 @@ def key(salt) -> bytes:
     return lib2fas.derive_key(PASSWORD, salt)
 
 
-@pytest.fixture
-def no_session_cache(monkeypatch):
-    """The container running these tests has no login keyring; make that explicit."""
-    monkeypatch.setattr(unlock_module.SessionKeyCache, "service", lambda self: None)
+class FakeSessionCache:
+    """Stands in for the login keyring, which the machine running the tests may not have."""
+
+    def __init__(self, **entries: CachedKey) -> None:
+        self.entries = dict(entries)
+        self.writes: list[tuple[str, str]] = []
+
+    def get(self, vault_id: str) -> CachedKey | None:
+        return self.entries.get(vault_id)
+
+    def put(self, vault_id: str, cached: CachedKey) -> None:
+        self.entries[vault_id] = cached
+        self.writes.append((vault_id, cached.via))
+
+    def drop(self, vault_id: str) -> None:
+        self.entries.pop(vault_id, None)
 
 
-def typed(value: str) -> typing.Callable[[str], str]:
-    return lambda _: value
+class FakeKeyring(lib2fas.KeyringManagerProtocol):
+    """Stands in for lib2fas' keyring manager, holding a passphrase an older version left."""
+
+    def __init__(self, passphrase: str = None) -> None:
+        self.passphrase = passphrase
+
+    def retrieve_credentials(self, filename: str) -> str | None:
+        return self.passphrase
+
+    def save_credentials(self, filename: str) -> str:  # pragma: no cover
+        return self.passphrase or ""
+
+    def delete_credentials(self, filename: str) -> None:
+        self.passphrase = None
+
+    def cleanup_keyring(self) -> int:
+        return 0
+
+
+def typed(*values: str) -> typing.Callable[[str], str]:
+    """A passphrase prompt that answers with each value in turn, repeating the last."""
+    answers = list(values)
+
+    def prompt(_: str) -> str:
+        return answers.pop(0) if len(answers) > 1 else answers[0]
+
+    return prompt
+
+
+def unlocker_for(store: KeyStore, session: FakeSessionCache = None, **kwargs) -> PolicyUnlocker:
+    """A PolicyUnlocker with every outside dependency replaced by something inspectable."""
+    kwargs.setdefault("prompt", typed(PASSWORD))
+    kwargs.setdefault("keyring_manager", FakeKeyring())
+    return PolicyUnlocker(store=store, session_cache=session or FakeSessionCache(), **kwargs)
 
 
 # --- settings parsing ---
@@ -158,57 +202,42 @@ def test_prune_keeps_moved_vaults(store, salt):
 # --- the policy engine ---
 
 
-def test_password_path_unlocks_and_caches(monkeypatch, store, salt, key, no_session_cache):
-    monkeypatch.setattr("getpass.getpass", typed(PASSWORD))
+def test_password_path_unlocks_and_caches(store, salt, key):
+    unlocker = unlocker_for(store, password_policy="process", prompt=typed(PASSWORD, "wrong"))
 
-    unlocker = PolicyUnlocker(password_policy="process", store=store)
     assert unlocker.unlock(FILENAME, salt) == key
     assert unlocker.used_path == "password"
-
-    # second call must not prompt again:
-    monkeypatch.setattr("getpass.getpass", typed("wrong"))
+    # the second call would get the wrong passphrase, so it must not be asking:
     assert unlocker.unlock(FILENAME, salt) == key
 
 
-def test_process_policy_never_touches_the_keyring(monkeypatch, store, salt):
-    monkeypatch.setattr("getpass.getpass", typed(PASSWORD))
-    written: list[tuple[str, str]] = []
-    monkeypatch.setattr(unlock_module.SessionKeyCache, "service", lambda self: "2fas:test")
-    monkeypatch.setattr(unlock_module.SessionKeyCache, "get", lambda self, vault_id: None)
-    monkeypatch.setattr(
-        unlock_module.SessionKeyCache, "put", lambda self, vault_id, cached: written.append((vault_id, cached.via))
-    )
+def test_process_policy_never_touches_the_keyring(store, salt):
+    session = FakeSessionCache()
 
-    PolicyUnlocker(password_policy="process", store=store).unlock(FILENAME, salt)
-    assert written == []
+    unlocker_for(store, session, password_policy="process").unlock(FILENAME, salt)
+    assert session.writes == []
 
-    PolicyUnlocker(password_policy="os-session", store=store).unlock(FILENAME, salt)
-    assert [via for _, via in written] == ["password"]
+    unlocker_for(store, session, password_policy="os-session").unlock(FILENAME, salt)
+    assert [via for _, via in session.writes] == ["password"]
 
 
-def test_tight_policies_ignore_a_stored_passphrase(monkeypatch, store, salt, key, no_session_cache):
-    # a passphrase left in the keyring must not silently satisfy 'ask me every time'.
-    monkeypatch.setattr(lib2fas.keyring_manager, "retrieve_credentials", lambda filename: PASSWORD, raising=False)
-    monkeypatch.setattr("getpass.getpass", typed(PASSWORD))
+def test_tight_policies_ignore_a_stored_passphrase(store, salt, key):
+    # a passphrase left in the keyring by an older version must not silently satisfy
+    # 'ask me every time'.
+    unlocker = unlocker_for(store, password_policy="code", keyring_manager=FakeKeyring(PASSWORD))
 
-    unlocker = PolicyUnlocker(password_policy="code", store=store)
     assert unlocker.unlock(FILENAME, salt) == key
     assert unlocker.needs_confirmation()
 
 
-def test_load_services_through_the_unlocker(monkeypatch, store, salt, no_session_cache):
-    monkeypatch.setattr("getpass.getpass", typed(PASSWORD))
-
-    unlocker = PolicyUnlocker(password_policy="process", store=store)
-    assert lib2fas.load_services(FILENAME, unlocker=unlocker)
+def test_load_services_through_the_unlocker(store, salt):
+    assert lib2fas.load_services(FILENAME, unlocker=unlocker_for(store, password_policy="process"))
 
 
-def test_wrong_passphrase_is_retried_and_not_remembered(monkeypatch, store, salt, no_session_cache):
-    attempts = iter(["wrong", PASSWORD])
-    monkeypatch.setattr("getpass.getpass", lambda _: next(attempts))
+def test_wrong_passphrase_is_retried_and_not_remembered(store, salt):
+    unlocker = unlocker_for(store, password_policy="process", prompt=typed("wrong", PASSWORD))
 
-    unlocker = PolicyUnlocker(password_policy="process", store=store)
-    assert lib2fas.load_services(FILENAME, _max_retries=3, unlocker=unlocker)
+    assert lib2fas.load_services(FILENAME, max_retries=3, unlocker=unlocker)
 
 
 # --- the security key path, with the hardware faked out ---
@@ -254,26 +283,28 @@ def enrolled_store(store: KeyStore, salt: bytes, key: bytes, fake: FakeSecurityK
     return store
 
 
-def test_security_key_path_unlocks_without_a_passphrase(monkeypatch, store, salt, key, no_session_cache):
+def security_key_unlocker(store: KeyStore, fake: FakeSecurityKey, session: FakeSessionCache = None, **kwargs):
+    """A PolicyUnlocker whose 'hardware' is a FakeSecurityKey."""
+    kwargs.setdefault("method", "security-key")
+    return unlocker_for(store, session, backend=fake, **kwargs)
+
+
+def test_security_key_path_unlocks_without_a_passphrase(store, salt, key):
     fake = FakeSecurityKey()
     enrolled_store(store, salt, key, fake)
 
-    monkeypatch.setattr("getpass.getpass", typed("should not be asked"))
-    unlocker = PolicyUnlocker(method="security-key", security_key_policy="process", store=store)
-    unlocker._import_backend = lambda: fake
+    unlocker = security_key_unlocker(store, fake, security_key_policy="process", prompt=typed("should not be asked"))
 
     assert unlocker.unlock(FILENAME, salt) == key
     assert unlocker.used_path == "security-key"
     assert fake.touches == 1
 
 
-def test_falls_back_to_the_passphrase_when_the_key_is_missing(monkeypatch, store, salt, key, no_session_cache):
-    fake = FakeSecurityKey(error=unlock_module.SecurityKeyError("not plugged in"))
+def test_falls_back_to_the_passphrase_when_the_key_is_missing(store, salt, key):
     enrolled_store(store, salt, key, FakeSecurityKey())
+    absent = FakeSecurityKey(error=unlock_module.SecurityKeyError("not plugged in"))
 
-    monkeypatch.setattr("getpass.getpass", typed(PASSWORD))
-    unlocker = PolicyUnlocker(method="security-key", security_key_policy="code", store=store)
-    unlocker._import_backend = lambda: fake
+    unlocker = security_key_unlocker(store, absent, security_key_policy="code")
 
     assert unlocker.unlock(FILENAME, salt) == key
     # the policy must follow the path taken, not the method configured:
@@ -282,56 +313,45 @@ def test_falls_back_to_the_passphrase_when_the_key_is_missing(monkeypatch, store
     assert not unlocker.needs_confirmation()
 
 
-def test_no_enrolment_falls_back_without_touching_hardware(monkeypatch, store, salt, key, no_session_cache):
+def test_no_enrolment_falls_back_without_touching_hardware(store, salt, key):
     fake = FakeSecurityKey()
-    monkeypatch.setattr("getpass.getpass", typed(PASSWORD))
-
-    unlocker = PolicyUnlocker(method="security-key", store=store)
-    unlocker._import_backend = lambda: fake
+    unlocker = security_key_unlocker(store, fake)
 
     assert unlocker.unlock(FILENAME, salt) == key
     assert unlocker.used_path == "password"
     assert fake.touches == 0
 
 
-def test_force_password_skips_the_key(monkeypatch, store, salt, key, no_session_cache):
+def test_force_password_skips_the_key(store, salt, key):
     fake = FakeSecurityKey()
     enrolled_store(store, salt, key, fake)
-    monkeypatch.setattr("getpass.getpass", typed(PASSWORD))
 
-    unlocker = PolicyUnlocker(method="security-key", store=store, force_password=True)
-    unlocker._import_backend = lambda: fake
+    unlocker = security_key_unlocker(store, fake, force_password=True)
 
     assert unlocker.unlock(FILENAME, salt) == key
     assert fake.touches == 0
 
 
-def test_confirmation_rejects_a_wrong_passphrase(monkeypatch, store, salt, key, no_session_cache):
-    monkeypatch.setattr("getpass.getpass", typed(PASSWORD))
-    unlocker = PolicyUnlocker(password_policy="code", store=store)
+def test_confirmation_rejects_a_wrong_passphrase(store, salt):
+    unlocker = unlocker_for(store, password_policy="code", prompt=typed(PASSWORD, PASSWORD, "wrong"))
     unlocker.unlock(FILENAME, salt)
 
     assert unlocker.confirm()
-
-    monkeypatch.setattr("getpass.getpass", typed("wrong"))
     assert not unlocker.confirm()
 
 
-def test_confirmation_is_skipped_under_looser_policies(monkeypatch, store, salt, no_session_cache):
-    monkeypatch.setattr("getpass.getpass", typed(PASSWORD))
-    unlocker = PolicyUnlocker(password_policy="process", store=store)
+def test_confirmation_is_skipped_under_looser_policies(store, salt):
+    unlocker = unlocker_for(store, password_policy="process", prompt=typed(PASSWORD, "would fail if asked"))
     unlocker.unlock(FILENAME, salt)
 
-    monkeypatch.setattr("getpass.getpass", typed("would fail if it were asked"))
     assert unlocker.confirm()
 
 
-def test_confirmation_touches_the_key_every_time(store, salt, key, no_session_cache):  # noqa: ARG001
+def test_confirmation_touches_the_key_every_time(store, salt, key):
     fake = FakeSecurityKey()
     enrolled_store(store, salt, key, fake)
 
-    unlocker = PolicyUnlocker(method="security-key", security_key_policy="code", store=store)
-    unlocker._import_backend = lambda: fake
+    unlocker = security_key_unlocker(store, fake, security_key_policy="code")
     assert unlocker.unlock(FILENAME, salt) == key
 
     assert unlocker.confirm()
@@ -342,58 +362,36 @@ def test_confirmation_touches_the_key_every_time(store, salt, key, no_session_ca
 # --- the cache must respect both the configured method and the policy tier ---
 
 
-class FakeSessionCache:
-    """Stands in for the login keyring, which the test container does not have."""
-
-    def __init__(self, **entries: CachedKey) -> None:
-        self.entries = dict(entries)
-        self.writes: list[tuple[str, str]] = []
-
-    def get(self, vault_id):
-        return self.entries.get(vault_id)
-
-    def put(self, vault_id, cached):
-        self.entries[vault_id] = cached
-        self.writes.append((vault_id, cached.via))
-
-    def drop(self, vault_id):
-        self.entries.pop(vault_id, None)
-
-
-def unlocker_with(store, salt, session: FakeSessionCache, **kwargs) -> PolicyUnlocker:
-    unlocker = PolicyUnlocker(store=store, **kwargs)
-    unlocker.session_cache = session
-    return unlocker
-
-
-def test_process_policy_ignores_a_key_another_run_left_behind(monkeypatch, store, salt, key):
+def test_process_policy_ignores_a_key_another_run_left_behind(store, salt, key):
     # 'once per run' has to mean it, so the cross-process cache may not even be read.
-    session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "password")})
-    monkeypatch.setattr("getpass.getpass", typed(PASSWORD))
+    cached = {vault_id_for(salt): CachedKey(key, "password")}
+    prompted: list[str] = []
 
-    assert unlocker_with(store, salt, session, password_policy="process").unlock(FILENAME, salt) == key
-    assert unlocker_with(store, salt, session, password_policy="os-session").unlock(FILENAME, salt) == key
+    def counting_prompt(message: str) -> str:
+        prompted.append(message)
+        return PASSWORD
 
-    # under os-session it comes from the keyring; under process it must have been asked for:
-    prompted = []
-    monkeypatch.setattr("getpass.getpass", lambda p: prompted.append(p) or PASSWORD)
-
-    unlocker_with(store, salt, session, password_policy="os-session").unlock(FILENAME, salt)
+    # under os-session the key comes from the keyring, so nothing is asked:
+    unlocker_for(store, FakeSessionCache(**cached), password_policy="os-session", prompt=counting_prompt).unlock(
+        FILENAME, salt
+    )
     assert prompted == []
 
-    unlocker_with(store, salt, session, password_policy="process").unlock(FILENAME, salt)
+    # under process that same cache entry must be ignored:
+    unlocker_for(store, FakeSessionCache(**cached), password_policy="process", prompt=counting_prompt).unlock(
+        FILENAME, salt
+    )
     assert len(prompted) == 1
 
 
-def test_a_passphrase_cache_does_not_satisfy_the_security_key_method(monkeypatch, store, salt, key):
+def test_a_passphrase_cache_does_not_satisfy_the_security_key_method(store, salt, key):
     # the bug: after setting up a key, a key cached by the earlier passphrase run kept
     # unlocking the vault, so switching the method looked like it did nothing at all.
     fake = FakeSecurityKey()
     enrolled_store(store, salt, key, fake)
     session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "password")})
 
-    unlocker = unlocker_with(store, salt, session, method="security-key", security_key_policy="os-session")
-    unlocker._import_backend = lambda: fake
+    unlocker = security_key_unlocker(store, fake, session, security_key_policy="os-session")
 
     assert unlocker.unlock(FILENAME, salt) == key
     assert unlocker.used_path == "security-key"
@@ -405,8 +403,7 @@ def test_a_security_key_cache_is_reused_under_os_session(store, salt, key):
     enrolled_store(store, salt, key, fake)
     session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "security-key")})
 
-    unlocker = unlocker_with(store, salt, session, method="security-key", security_key_policy="os-session")
-    unlocker._import_backend = lambda: fake
+    unlocker = security_key_unlocker(store, fake, session, security_key_policy="os-session")
 
     assert unlocker.unlock(FILENAME, salt) == key
     assert fake.touches == 0  # one touch per boot, and this boot already had one
@@ -417,8 +414,7 @@ def test_security_key_touches_every_run_under_process(store, salt, key):
     enrolled_store(store, salt, key, fake)
     session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "security-key")})
 
-    unlocker = unlocker_with(store, salt, session, method="security-key", security_key_policy="process")
-    unlocker._import_backend = lambda: fake
+    unlocker = security_key_unlocker(store, fake, session, security_key_policy="process")
 
     assert unlocker.unlock(FILENAME, salt) == key
     assert fake.touches == 1
@@ -429,12 +425,14 @@ def test_security_key_touches_every_run_under_process(store, salt, key):
     assert fake.touches == 1
 
 
-def test_unenrolled_vault_uses_the_passphrase_cache(monkeypatch, store, salt, key):
-    # method is security-key, but this particular vault has no key set up: the passphrase is
-    # what will be used, so its cache is the right one to consult.
+def test_unenrolled_vault_uses_the_passphrase_cache(store, salt, key):
+    # method is security-key, but this particular vault has no key set up: the passphrase
+    # is what will be used, so its cache is the right one to consult.
     session = FakeSessionCache(**{vault_id_for(salt): CachedKey(key, "password")})
-    monkeypatch.setattr("getpass.getpass", typed("would fail if it were asked"))
 
-    unlocker = unlocker_with(store, salt, session, method="security-key", password_policy="os-session")
+    unlocker = security_key_unlocker(
+        store, FakeSecurityKey(), session, password_policy="os-session", prompt=typed("would fail if asked")
+    )
+
     assert unlocker.unlock(FILENAME, salt) == key
     assert unlocker.used_path == "password"

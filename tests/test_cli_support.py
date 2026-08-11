@@ -1,6 +1,18 @@
-import pytest
+import threading
+import time
 
-from src.twofas.cli_support import generate_choices, generate_custom_style, state
+import pytest
+import questionary
+from prompt_toolkit.input import create_pipe_input
+from prompt_toolkit.output import DummyOutput
+
+from src.twofas.cli_support import (
+    cursor_value,
+    escapable,
+    generate_choices,
+    generate_custom_style,
+    state,
+)
 
 
 def test_state():
@@ -26,16 +38,6 @@ def test_choices():
 
 def _piped(keys: str, delay: float = 0.0):
     """Run a menu against a pipe, optionally sending the keys a moment after it starts."""
-    import threading
-    import time
-
-    from prompt_toolkit.input import create_pipe_input
-    from prompt_toolkit.output import DummyOutput
-
-    import questionary
-
-    from src.twofas.cli_support import escapable
-
     choices = [
         questionary.Choice("first", "a"),
         questionary.Choice("second", "b"),
@@ -87,18 +89,12 @@ def test_ctrl_c_is_not_swallowed():
 
 
 def test_style_without_selected_marking():
-    from src.twofas.cli_support import generate_custom_style
-
     # single-choice menus turn 'selected' off, because questionary lets it override the
     # cursor highlight and then one row is painted a different color for no reason.
     assert generate_custom_style(mark_selected=False)
 
 
 def test_cursor_skips_an_unselectable_current():
-    import questionary
-
-    from src.twofas.cli_support import cursor_value, generate_choices
-
     choices = generate_choices({"a": "a", "b": "b"}, with_exit=False, disabled={"b": "not yet"})
 
     assert cursor_value(choices, "a") == "a"

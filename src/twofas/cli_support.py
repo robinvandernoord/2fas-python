@@ -7,10 +7,12 @@ import typing
 
 import configuraptor
 import questionary
+from prompt_toolkit.key_binding import KeyBindings
 from configuraptor import beautify, postpone
 from typing_extensions import Never
 
 from .cli_settings import CliSettings
+from .unlock import PolicyUnlocker
 
 
 @beautify
@@ -21,6 +23,8 @@ class AppState(configuraptor.TypedConfig, configuraptor.Singleton):
 
     verbose: bool = False
     settings: CliSettings = postpone()
+    # the unlocker for this run; see twofas.cli.get_unlocker
+    unlocker: PolicyUnlocker | None = None
 
 
 state = AppState.load({})
@@ -133,7 +137,6 @@ def escapable(question: questionary.Question) -> questionary.Question:
     questionary only binds Ctrl-C, which leaves Escape - the key people actually reach for -
     doing nothing at all. See BINDING_TIMEOUT for why this also retunes the timeouts.
     """
-    from prompt_toolkit.key_binding import KeyBindings
 
     def escape(event: typing.Any) -> None:
         event.app.exit(result=None)

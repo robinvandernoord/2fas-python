@@ -13,11 +13,12 @@ Layout: ~/.config/2fas/keys/<vault_id>.json, one file per vault, mode 0600.
 """
 
 import base64
+import dataclasses
 import hashlib
 import json
 import os
 import time
-import typing
+import typing as t
 from pathlib import Path
 
 from .cli_settings import KEYS_DIR
@@ -45,7 +46,8 @@ def _unb64(data: str) -> bytes:
     return base64.b64decode(data)
 
 
-class WrappedKey(typing.NamedTuple):
+@dataclasses.dataclass(frozen=True)
+class WrappedKey:
     """
     One vault's derived key, encrypted under a key that only the hardware token can produce.
     """
@@ -59,9 +61,9 @@ class WrappedKey(typing.NamedTuple):
     filename_hint: str
     created: int
 
-    def to_json(self) -> dict[str, typing.Any]:
+    def to_dict(self) -> dict[str, t.Any]:
         """
-        Serializable form, as written to disk.
+        Plain dict, ready to be serialized. Writing the JSON is `KeyStore`'s job.
         """
         return {
             "version": CURRENT_VERSION,
@@ -78,9 +80,9 @@ class WrappedKey(typing.NamedTuple):
         }
 
     @classmethod
-    def from_json(cls, data: dict[str, typing.Any]) -> "WrappedKey":
+    def from_dict(cls, data: dict[str, t.Any]) -> "WrappedKey":
         """
-        Parse a blob written by `to_json`.
+        Rebuild an instance from `to_dict` output.
 
         Raises:
             ValueError: on an unknown version or a malformed blob.
@@ -130,7 +132,7 @@ class KeyStore:
             return None
 
         try:
-            return WrappedKey.from_json(json.loads(path.read_text()))
+            return WrappedKey.from_dict(json.loads(path.read_text()))
         except (OSError, ValueError, json.JSONDecodeError):
             # a corrupt blob should not be fatal: the passphrase always still works.
             return None
@@ -147,7 +149,7 @@ class KeyStore:
         tmp = path.with_suffix(".json.tmp")
         descriptor = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(descriptor, "w") as f:
-            json.dump(wrapped.to_json(), f, indent=2)
+            json.dump(wrapped.to_dict(), f, indent=2)
 
         tmp.replace(path)
         return path
@@ -177,7 +179,7 @@ class KeyStore:
 
         return result
 
-    def prune(self, live_vault_ids: typing.Collection[str]) -> list[WrappedKey]:
+    def prune(self, live_vault_ids: t.Collection[str]) -> list[WrappedKey]:
         """
         Drop entries that can no longer belong to a vault this installation knows about.
 

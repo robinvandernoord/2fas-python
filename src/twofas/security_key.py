@@ -24,7 +24,7 @@ RP-id check.
 import contextlib
 import os
 import threading
-import typing
+import typing as t
 
 RP_ID = "2fas.local"
 RP_NAME = "2fas"
@@ -34,10 +34,15 @@ HMAC_SALT_LENGTH = 32  # required by the hmac-secret extension
 NONCE_LENGTH = 12  # AES-GCM
 DEFAULT_TIMEOUT = 30.0
 
-# The unlock path always asserts with user presence only and never with user
-# verification. That is not just a convenience choice: hmac-secret returns a *different*
-# secret when uv is used (CredRandomWithUV vs CredRandomWithoutUV), so mixing the two
-# would silently make previously wrapped keys unopenable.
+# CTAP2 has two ways for an authenticator to establish that a human is involved:
+#   up = user presence     - somebody touched the key. That is all we ask for.
+#   uv = user verification - somebody proved *who* they are, with the key's PIN or its
+#                            fingerprint reader.
+#
+# We always assert with presence only. That is not just a convenience choice: hmac-secret
+# derives from a different seed depending on which was used (CredRandomWithUV vs
+# CredRandomWithoutUV), so a key wrapped without verification can only be unwrapped
+# without verification. Mixing the two silently makes stored keys unopenable.
 ASSERT_OPTIONS: dict[str, bool] = {"up": True, "uv": False}
 
 
@@ -92,7 +97,7 @@ def _require_fido2() -> None:
         )
 
 
-class Authenticator(typing.NamedTuple):
+class Authenticator(t.NamedTuple):
     """
     A description of a connected authenticator, for the setup screen.
     """
@@ -106,7 +111,7 @@ class Authenticator(typing.NamedTuple):
 
 
 @contextlib.contextmanager
-def _open_devices() -> typing.Iterator[list[typing.Any]]:
+def _open_devices() -> t.Iterator[list[t.Any]]:
     """
     Open every connected FIDO2 HID device and close them all again afterwards.
     """
@@ -158,7 +163,7 @@ def describe_authenticators() -> list[Authenticator]:
 
 
 @contextlib.contextmanager
-def _hmac_secret_authenticator() -> typing.Iterator[typing.Any]:
+def _hmac_secret_authenticator() -> t.Iterator[t.Any]:
     """
     Yield a Ctap2 handle for the first connected authenticator that speaks hmac-secret.
 
@@ -190,7 +195,7 @@ def _hmac_secret_authenticator() -> typing.Iterator[typing.Any]:
         raise NoAuthenticator("A device was found, but it does not speak CTAP2.")
 
 
-def _shared_secret(ctap: typing.Any) -> tuple[typing.Any, typing.Any, bytes]:
+def _shared_secret(ctap: t.Any) -> tuple[t.Any, t.Any, bytes]:
     """
     Do the CTAP2 key agreement needed to send an encrypted hmac-secret salt.
 
@@ -203,8 +208,8 @@ def _shared_secret(ctap: typing.Any) -> tuple[typing.Any, typing.Any, bytes]:
     protocol = PinProtocolV2() if 2 in protocols or not protocols else PinProtocolV1()
 
     response = ctap.client_pin(protocol.VERSION, ClientPin.CMD.GET_KEY_AGREEMENT)
-    encapsulate = typing.cast(
-        typing.Callable[[typing.Any], tuple[typing.Any, bytes]],
+    encapsulate = t.cast(
+        t.Callable[[t.Any], tuple[t.Any, bytes]],
         protocol.encapsulate,
     )
     key_agreement, shared = encapsulate(response[ClientPin.RESULT.KEY_AGREEMENT])
@@ -212,7 +217,7 @@ def _shared_secret(ctap: typing.Any) -> tuple[typing.Any, typing.Any, bytes]:
 
 
 @contextlib.contextmanager
-def _touch_deadline(timeout: float) -> typing.Iterator[threading.Event]:
+def _touch_deadline(timeout: float) -> t.Iterator[threading.Event]:
     """
     Cancel the pending CTAP request if the user does not touch the key in time.
     """
@@ -246,7 +251,7 @@ def _translate_ctap_error(error: Exception, event: threading.Event) -> SecurityK
     return SecurityKeyError(str(error))
 
 
-def _keepalive_printer(announce: typing.Callable[[], None]) -> typing.Callable[[int], None]:
+def _keepalive_printer(announce: t.Callable[[], None]) -> t.Callable[[int], None]:
     """
     Build an on_keepalive callback that tells the user to touch their key, once.
 
@@ -266,7 +271,7 @@ def _keepalive_printer(announce: typing.Callable[[], None]) -> typing.Callable[[
 def create_credential(
     pin: str = None,
     timeout: float = DEFAULT_TIMEOUT,
-    announce: typing.Callable[[], None] = lambda: None,
+    announce: t.Callable[[], None] = lambda: None,
 ) -> bytes:
     """
     Register a new non-discoverable hmac-secret credential and return its credential id.
@@ -331,7 +336,7 @@ def evaluate_hmac_secret(
     credential_id: bytes,
     hmac_salt: bytes,
     timeout: float = DEFAULT_TIMEOUT,
-    announce: typing.Callable[[], None] = lambda: None,
+    announce: t.Callable[[], None] = lambda: None,
 ) -> bytes:
     """
     Ask the authenticator for HMAC-SHA256(CredRandom, hmac_salt); requires a touch.
