@@ -2,6 +2,11 @@
 
 <!--next-version-placeholder-->
 
+## v1.2.1 (2026-09-07)
+
+### Fix
+* **security-key:** handle missing fido2 dependency gracefully
+
 ## v1.2.0 (2026-08-11)
 
 ### Feature
