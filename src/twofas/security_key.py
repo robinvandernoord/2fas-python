@@ -135,6 +135,7 @@ def describe_authenticators() -> list[Authenticator]:
     """
     Report on every connected authenticator, without asking the user for anything.
     """
+    _require_fido2()
     from fido2.ctap2.base import Ctap2
 
     found = []
@@ -171,6 +172,7 @@ def _hmac_secret_authenticator() -> t.Iterator[t.Any]:
         NoAuthenticator: nothing usable is plugged in.
         HmacSecretUnsupported: something is plugged in, but it can not do this.
     """
+    _require_fido2()
     from fido2.ctap2.base import Ctap2
 
     with _open_devices() as devices:

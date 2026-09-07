@@ -1,8 +1,10 @@
+import sys
 import typing
 
 import lib2fas
 import pytest
 
+from src.twofas import security_key
 from src.twofas import unlock as unlock_module
 from src.twofas.keystore import KeyStore, new_wrapped_key, vault_id_for
 from src.twofas.unlock import (
@@ -462,6 +464,49 @@ def test_unenrolled_vault_uses_the_passphrase_cache(store, salt, key):
     unlocker = security_key_unlocker(
         store, FakeSecurityKey(), session, password_policy="os-session", prompt=typed("would fail if asked")
     )
+
+    assert unlocker.unlock(FILENAME, salt) == key
+    assert unlocker.used_path == "password"
+
+
+@pytest.fixture
+def without_fido2(monkeypatch):
+    """Make `import fido2` fail, however the test machine happens to be installed."""
+
+    class Blocker:
+        def find_spec(self, name, path=None, target=None):
+            if name == "fido2" or name.startswith("fido2."):
+                raise ImportError("blocked by the test", name=name)
+            return None
+
+    for module in [_ for _ in sys.modules if _ == "fido2" or _.startswith("fido2.")]:
+        monkeypatch.delitem(sys.modules, module)
+
+    monkeypatch.setattr(sys, "meta_path", [Blocker(), *sys.meta_path])
+    assert not security_key.fido2_available()
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda: security_key.describe_authenticators(),
+        lambda: security_key.create_credential(),
+        lambda: security_key.evaluate_hmac_secret(b"cred", b"H" * 32),
+    ],
+    ids=["describe", "create", "evaluate"],
+)
+def test_missing_fido2_is_a_security_key_error(without_fido2, call):
+    # every entry point imports fido2 lazily; an ImportError escaping instead of a
+    # SecurityKeyError is what used to crash 2fas for anyone without the extra.
+    with pytest.raises(security_key.Fido2NotInstalled):
+        call()
+
+
+def test_without_fido2_an_enrolled_vault_still_unlocks(without_fido2, store, salt, key):
+    # the vault was enrolled while the extra was installed; it went away since.
+    enrolled_store(store, salt, key, FakeSecurityKey())
+
+    unlocker = security_key_unlocker(store, security_key, security_key_policy="process")
 
     assert unlocker.unlock(FILENAME, salt) == key
     assert unlocker.used_path == "password"
