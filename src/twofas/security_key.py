@@ -219,11 +219,15 @@ def _shared_secret(ctap: t.Any) -> tuple[t.Any, t.Any, bytes]:
 
 
 @contextlib.contextmanager
-def _touch_deadline(timeout: float) -> t.Iterator[threading.Event]:
+def _touch_deadline(timeout: float, cancel: threading.Event | None = None) -> t.Iterator[threading.Event]:
     """
     Cancel the pending CTAP request if the user does not touch the key in time.
+
+    Args:
+        timeout: seconds to wait for a touch.
+        cancel: lets the caller abort the wait early by setting it; the deadline sets it too.
     """
-    event = threading.Event()
+    event = cancel or threading.Event()
     timer = threading.Timer(timeout, event.set)
     timer.daemon = True
     timer.start()
@@ -339,6 +343,7 @@ def evaluate_hmac_secret(
     hmac_salt: bytes,
     timeout: float = DEFAULT_TIMEOUT,
     announce: t.Callable[[], None] = lambda: None,
+    cancel: threading.Event | None = None,
 ) -> bytes:
     """
     Ask the authenticator for HMAC-SHA256(CredRandom, hmac_salt); requires a touch.
@@ -348,6 +353,8 @@ def evaluate_hmac_secret(
         hmac_salt: 32 bytes, stored alongside the wrapped key.
         timeout: seconds to wait for a touch.
         announce: called once when the key is waiting to be touched.
+        cancel: set it from another thread to stop waiting for the touch, which then raises
+            TouchTimeout. For callers without a terminal, such as a launcher plugin.
 
     Raises:
         SecurityKeyError: and subclasses; the caller should fall back to the passphrase.
@@ -360,7 +367,7 @@ def evaluate_hmac_secret(
         salt_enc = protocol.encrypt(shared, hmac_salt)
         salt_auth = protocol.authenticate(shared, salt_enc)
 
-        with _touch_deadline(timeout) as event:
+        with _touch_deadline(timeout, cancel) as event:
             try:
                 assertion = ctap.get_assertion(
                     rp_id=RP_ID,
