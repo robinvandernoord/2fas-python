@@ -2,6 +2,11 @@
 
 <!--next-version-placeholder-->
 
+## v1.3.0 (2026-11-10)
+
+### Feature
+* **security-key:** allow cancelling touch wait
+
 ## v1.2.1 (2026-09-07)
 
 ### Fix
